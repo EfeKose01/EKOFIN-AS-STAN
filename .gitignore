@@ -1,0 +1,10 @@
+# Gizli API anahtarları ve ayarlar
+.env
+
+# Python sanal ortam klasörü (eğer kullanıyorsan)
+venv/
+__pycache__/
+
+# Diğer genel dosyalar (isteğe bağlı)
+*.pyc
+.DS_Store

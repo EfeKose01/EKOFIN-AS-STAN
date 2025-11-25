@@ -1,0 +1,93 @@
+{
+  "dataset_name": "BDDK_Bankacilik_Mevzuat_Set",
+  "version": "1.0",
+  "language": "tr",
+  "jurisdiction": "TR",
+  "documents": [
+    {
+      "id": "01",
+      "title": "Bankacılık Kanunu (5411)",
+      "tags": ["kanun", "çekirdek"]
+    },
+    {
+      "id": "02",
+      "title": "BDDK Kuruluş ve Görevleri",
+      "tags": ["kurum", "bdkk"]
+    },
+    {
+      "id": "05",
+      "title": "Kredi Tahsis ve Limitlendirme",
+      "tags": ["kredi", "risk"]
+    },
+    {
+      "id": "09",
+      "title": "Tüketici Kredileri ve Kredi Kartları",
+      "tags": ["tüketici", "kredi-kartı"]
+    },
+    {
+      "id": "13",
+      "title": "LCR ve NSFR (Likidite Risk Yönetimi)",
+      "tags": ["likidite", "basel"]
+    },
+    {
+      "id": "16",
+      "title": "İç Denetim ve Uyum Birimleri",
+      "tags": ["denetim", "uyum"]
+    },
+    {
+      "id": "18",
+      "title": "Piyasa Riski ve Kur Riski",
+      "tags": ["risk", "fx"]
+    },
+    {
+      "id": "21",
+      "title": "Dijital Bankacılık ve Ödeme Sistemleri",
+      "tags": ["dijital", "ödeme"]
+    },
+    {
+      "id": "22",
+      "title": "Dijital Müşteri Edinim Süreçleri",
+      "tags": ["dijital", "müşteri"]
+    },
+    {
+      "id": "23",
+      "title": "Veri Güvenliği ve KVKK Uyumu",
+      "tags": ["kvkk", "siber"]
+    },
+    {
+      "id": "26",
+      "title": "Finansal Tüketici Hakları",
+      "tags": ["tüketici", "haklar"]
+    },
+    {
+      "id": "27",
+      "title": "Kamuyu Aydınlatma ve Yatırımcı İlişkileri",
+      "tags": ["şeffaflık", "yatırımcı"]
+    },
+    {
+      "id": "31",
+      "title": "AML/CFT (Kara Para Aklama ile Mücadele)",
+      "tags": ["AML", "CFT", "masak"]
+    },
+    {
+      "id": "32",
+      "title": "Yeşil Finansman ve Sürdürülebilir Bankacılık",
+      "tags": ["ESG", "yeşil", "sürdürülebilir"]
+    },
+    {
+      "id": "33",
+      "title": "Katılım Bankacılığı Düzenlemeleri",
+      "tags": ["katılım", "faizsiz"]
+    },
+    {
+      "id": "35",
+      "title": "Makro İhtiyati Politikalar",
+      "tags": ["makro", "finansal-istikrar"]
+    },
+    {
+      "id": "50",
+      "title": "Kriz Yönetimi ve Olağanüstü Hal Düzenlemeleri",
+      "tags": ["kriz", "olağanüstü", "tmsf"]
+    }
+  ]
+}
