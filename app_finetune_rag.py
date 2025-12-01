@@ -124,6 +124,48 @@ def _fetch_single_symbol_close_series(yf_symbol: str):
         return None
 
 
+# --- YENİ: INTRADAY İSTATİSTİK FONKSİYONU ---
+
+def get_intraday_stats(yf_symbol: str) -> Dict[str, float]:
+    """
+    Tek bir sembol için son 1 günlük (intraday) temel istatistikleri döner.
+    Destek/direnç ve gün içi volatiliteyi GERÇEK grafiğe dayandırmak için kullanıyoruz.
+    """
+    try:
+        intraday = yf.download(
+            tickers=yf_symbol,
+            period="1d",
+            interval="5m",
+            auto_adjust=False,
+            progress=False,
+        )
+        if intraday.empty:
+            return {}
+
+        try:
+            intraday.index = intraday.index.tz_localize(None)
+        except Exception:
+            pass
+
+        day_low = float(intraday["Low"].min())
+        day_high = float(intraday["High"].max())
+        day_close = float(intraday["Close"].iloc[-1])
+        day_open = float(intraday["Open"].iloc[0])
+
+        intraday_range = day_high - day_low
+        vol_pct = (intraday_range / day_open * 100) if day_open != 0 else 0.0
+
+        return {
+            "gunluk_en_dusuk": round(day_low, 2),
+            "gunluk_en_yuksek": round(day_high, 2),
+            "gunluk_acilis": round(day_open, 2),
+            "gunluk_kapanis": round(day_close, 2),
+            "gunluk_volatilite_yuzde": round(vol_pct, 2),
+        }
+    except Exception:
+        return {}
+
+
 def get_market_data(symbols: str) -> Dict[str, Any]:
     """
     Bir veya daha fazla sembol için fiyat geçmişini çeker.
@@ -131,6 +173,7 @@ def get_market_data(symbols: str) -> Dict[str, Any]:
     - download + history fallback
     - çoklu sembolde tek grafikte normalize edilmiş çizgi
     - istatistikler: ilk/son fiyat + yüzde değişim
+    - TEK SEMBOLDE ekstradan 1 günlük intraday istatistikleri de döner
     """
     raw_symbols = [s.strip().upper() for s in symbols.split(",") if s.strip()]
     if not raw_symbols:
@@ -234,12 +277,16 @@ def get_market_data(symbols: str) -> Dict[str, Any]:
     if empty_symbols:
         uyari_parts.append("Veri alınamayan semboller: " + ", ".join(empty_symbols))
 
+    # --- TEK SEMBOL DURUMU: detaylı JSON + intraday ---
     if len(comparison_df.columns) == 1:
         col = comparison_df.columns[0]
         last_close = float(comparison_df[col].iloc[-1])
         previous_close = float(comparison_df[col].iloc[-2]) if len(comparison_df) > 1 else last_close
         change = last_close - previous_close
         percent_change = (change / previous_close * 100) if previous_close != 0 else 0.0
+
+        yf_symbol = symbol_map[col]
+        intraday_stats = get_intraday_stats(yf_symbol)
 
         result: Dict[str, Any] = {
             "sembol": col,
@@ -249,10 +296,15 @@ def get_market_data(symbols: str) -> Dict[str, Any]:
             "gunluk_degisim_yuzde": f"{percent_change:.2f}%",
             "yillik_istatistik": stats[col],
         }
+
+        # Gün içi istatistikleri de ekle (varsa)
+        result.update(intraday_stats)
+
         if uyari_parts:
             result["uyari"] = " ".join(uyari_parts)
         return result
 
+    # --- ÇOKLU SEMBOL DURUMU: karşılaştırma özeti ---
     summary_text = (
         f"{len(comparison_df.columns)} adet hisse için karşılaştırmalı veriler çekilmiştir. "
         f"Hisseler: {', '.join(comparison_df.columns)}. Normalleştirilmiş grafikte birlikte göster."
@@ -517,51 +569,81 @@ SENİN GÖREVİN:
             messages_for_final_answer.append({"role": "user", "content": final_prompt_text})
             return call_claude(messages_for_final_answer)
 
-        # Hisse grafiği fallback
+        # Hisse grafiği / fiyat analizi fallback
         if should_force_market:
-            symbols_found = re.findall(r"\b[A-ZÇĞİÖŞÜ]{3,5}\b", last_user_msg.upper())
+            # Mesajdan potansiyel sembolleri ayıkla
+            raw_tokens = re.findall(r"\b[A-Z0-9\.]{3,8}\b", last_user_msg.upper())
+
+            # Hisse ile ilgisiz sık kullanılan kelimeleri ele
+            BLACKLIST_TOKENS = {
+                "TRADE", "YAP", "AL", "SAT", "GRAFIK", "GRAFİK",
+                "GUNLUK", "GÜNLÜK", "BACKTEST", "TEST", "ICIN", "İÇİN",
+                "STRATEJI", "STRATEJİ"
+            }
+
+            symbols_found = [t for t in raw_tokens if t not in BLACKLIST_TOKENS]
             symbols_unique = list(dict.fromkeys(symbols_found))
+
+            # Bu mesajda sembol yoksa, önceki sembolleri kullan
             if not symbols_unique and "last_symbols" in st.session_state:
                 symbols_unique = st.session_state.last_symbols
 
-            if symbols_unique:
-                symbols_str = ",".join(symbols_unique)
-                result = get_market_data(symbols_str)
+            # Hâlâ sembol yoksa, kullanıcıdan hisse adı iste
+            if not symbols_unique:
+                history_without_last_prompt = chat_history[:-1]
+                messages_for_final_answer = [{"role": "system", "content": system_prompt}] + history_without_last_prompt
+                messages_for_final_answer.append(
+                    {
+                        "role": "assistant",
+                        "content": (
+                            "Kısa vadeli fiyat / grafik analizi yapabilmem için hangi hisse senedi veya endeks "
+                            "için strateji istediğinizi belirtir misiniz? Örn: GARAN, THYAO, BIST100."
+                        ),
+                    }
+                )
+                return call_claude(messages_for_final_answer)
 
-                if isinstance(result, dict):
-                    if "hata" in result:
-                        detay = result.get("detay", "")
-                        if detay:
-                            tool_output = f"Hata: {result['hata']}\nDetay: {detay}"
-                        else:
-                            tool_output = f"Hata: {result['hata']}"
+            # Buraya geldiysek elimizde en az bir sembol var
+            symbols_str = ",".join(symbols_unique)
+            result = get_market_data(symbols_str)
+
+            if isinstance(result, dict):
+                if "hata" in result:
+                    detay = result.get("detay", "")
+                    if detay:
+                        tool_output = f"Hata: {result['hata']}\nDetay: {detay}"
                     else:
-                        tool_output = json.dumps(result, indent=2, ensure_ascii=False)
-                elif isinstance(result, list):
-                    tool_output = json.dumps(result, indent=2, ensure_ascii=False)
-                elif isinstance(result, str):
-                    tool_output = result
+                        tool_output = f"Hata: {result['hata']}"
                 else:
-                    tool_output = str(result)
+                    tool_output = json.dumps(result, indent=2, ensure_ascii=False)
+            elif isinstance(result, list):
+                tool_output = json.dumps(result, indent=2, ensure_ascii=False)
+            elif isinstance(result, str):
+                tool_output = result
+            else:
+                tool_output = str(result)
 
-                final_prompt_text = f"""Kullanıcının '{last_user_msg}' sorusuna cevap vermek için doğrudan hisse verileri getirildi:
+            final_prompt_text = f"""Kullanıcının '{last_user_msg}' sorusuna cevap vermek için doğrudan hisse verileri getirildi:
 --- ARAÇ SONUCU (get_market_data, zorunlu fallback) ---
 {tool_output}
 ---
 SENİN GÖREVİN:
 1. Bu sonucu analiz et ve kullanıcıya net, tutarlı bir cevap oluştur.
-2. Cevabını, sana atanan kimliğin (persona) gerektirdiği formata uygun şekilde, sonunda EN AZ 3 adet devam sorusu önererek tamamla.
-3. Eğer bazı semboller için veri yoksa, bunu belirt ama veri olan semboller üzerinden mutlaka analiz yap.
-4. Bu uygulamada sadece kapanış fiyatları ve bunlardan türetilen yüzdesel değişimler ve basit karşılaştırmalar kullanılabilir.
-5. RSI, hacim, 50/200 günlük ortalama vb. teknik göstergeler için SAYISAL değeri veya yüzdesel değişimi UYDURMA; bu göstergeler için sadece fiyat ve yüzdesel değişim üzerinden yorum yapabileceğini açıkla.
+2. Eğer JSON içinde 'gunluk_en_dusuk' ve 'gunluk_en_yuksek' alanları varsa, kısa vadeli destek ve direnç seviyelerini bu sayılara DAYANDIR. Bu aralığın biraz içini veya çevresini kullanabilirsin ama kesinlikle bambaşka fiyat seviyeleri uydurma.
+3. Özellikle '1 günlük grafikte' veya 'gün içi' ifadesi geçiyorsa, yorumlarında önceliği bu günlük aralık ve volatilite bilgisine ver.
+4. Cevabını, sana atanan kimliğin (persona) gerektirdiği formata uygun şekilde, sonunda EN AZ 3 adet devam sorusu önererek tamamla.
+5. Eğer bazı semboller için veri yoksa, bunu belirt ama veri olan semboller üzerinden mutlaka analiz yap.
+6. Bu uygulamada sadece kapanış fiyatları ve bunlardan türetilen yüzdesel değişimler ve basit karşılaştırmalar kullanılabilir.
+7. RSI, hacim, 50/200 günlük ortalama vb. teknik göstergeler için SAYISAL değeri veya yüzdesel değişimi UYDURMA; bu göstergeler için sadece fiyat ve yüzdesel değişim üzerinden yorum yapabileceğini açıkla.
 """
-                history_without_last_prompt = chat_history[:-1]
-                messages_for_final_answer = [{"role": "system", "content": system_prompt}] + history_without_last_prompt
-                messages_for_final_answer.append(
-                    {"role": "assistant", "content": "TOOL_CALL: get_market_data(...) [python_fallback]"}
-                )
-                messages_for_final_answer.append({"role": "user", "content": final_prompt_text})
-                return call_claude(messages_for_final_answer)
+
+            history_without_last_prompt = chat_history[:-1]
+            messages_for_final_answer = [{"role": "system", "content": system_prompt}] + history_without_last_prompt
+            messages_for_final_answer.append(
+                {"role": "assistant", "content": "TOOL_CALL: get_market_data(...) [python_fallback]"}
+            )
+            messages_for_final_answer.append({"role": "user", "content": final_prompt_text})
+            return call_claude(messages_for_final_answer)
 
         # Ne haber, ne hisse → normal direkt cevap
         messages_for_direct_answer = [{"role": "system", "content": system_prompt}] + chat_history
@@ -655,10 +737,12 @@ SENİN GÖREVİN:
 ---
 SENİN GÖREVİN:
 1. Bu sonucu analiz et ve kullanıcıya net bir cevap oluştur.
-2. Cevabını, sana atanan kimliğin (persona) gerektirdiği formata uygun şekilde, sonunda EN AZ 3 adet devam sorusu önererek tamamla.
-3. Araç çıktısında bazı semboller için veri yoksa, yine de veri olan semboller üzerinden analiz yap ve eksik sembolleri ayrıca belirt.
-4. Bu uygulamada sadece kapanış fiyatları ve bunlardan türetilen yüzdesel değişimler ve basit karşılaştırmalar kullanılabilir.
-5. RSI, hacim, 50/200 günlük ortalama vb. teknik göstergeler için SAYISAL değeri veya yüzdesel değişimi UYDURMA; bu göstergeler sorulursa yalnızca fiyat hareketi ve yüzdesel değişim üzerinden yorum yapabileceğini açıkla.
+2. Eğer JSON içinde 'gunluk_en_dusuk' ve 'gunluk_en_yuksek' alanları varsa, kısa vadeli destek ve direnç seviyelerini bu sayılara DAYANDIR. Bu aralığın biraz içini veya çevresini kullanabilirsin ama kesinlikle bambaşka fiyat seviyeleri uydurma.
+3. Özellikle '1 günlük grafikte' veya 'gün içi' ifadesi geçiyorsa, yorumlarında önceliği bu günlük aralık ve volatilite bilgisine ver.
+4. Cevabını, sana atanan kimliğin (persona) gerektirdiği formata uygun şekilde, sonunda EN AZ 3 adet devam sorusu önererek tamamla.
+5. Araç çıktısında bazı semboller için veri yoksa, yine de veri olan semboller üzerinden analiz yap ve eksik sembolleri ayrıca belirt.
+6. Bu uygulamada sadece kapanış fiyatları ve bunlardan türetilen yüzdesel değişimler ve basit karşılaştırmalar kullanılabilir.
+7. RSI, hacim, 50/200 günlük ortalama vb. teknik göstergeler için SAYISAL değeri veya yüzdesel değişimi UYDURMA; bu göstergeler sorulursa yalnızca fiyat hareketi ve yüzdesel değişim üzerinden yorum yapabileceğini açıkla.
 """
 
     history_without_last_prompt = chat_history[:-1]
@@ -866,8 +950,8 @@ def run_streamlit_app() -> None:
         # Dosya yüklenince state'e hem içerik hem de orijinal byte'lar kaydediliyor
         if uploaded_file is not None:
             file_changed = (
-                    "last_uploaded_name" not in st.session_state
-                    or st.session_state.last_uploaded_name != uploaded_file.name
+                "last_uploaded_name" not in st.session_state
+                or st.session_state.last_uploaded_name != uploaded_file.name
             )
             if file_changed:
                 # Her yeni dosyada state'i sıfırla
@@ -1124,9 +1208,9 @@ def run_streamlit_app() -> None:
 
         # --- DOSYA SİL / SIFIRLA BUTONU ---
         if (
-                ("uploaded_df" in st.session_state and st.session_state.uploaded_df is not None)
-                or ("uploaded_pdf_text" in st.session_state and st.session_state.uploaded_pdf_text)
-                or ("uploaded_file_bytes" in st.session_state and st.session_state.uploaded_file_bytes)
+            ("uploaded_df" in st.session_state and st.session_state.uploaded_df is not None)
+            or ("uploaded_pdf_text" in st.session_state and st.session_state.uploaded_pdf_text)
+            or ("uploaded_file_bytes" in st.session_state and st.session_state.uploaded_file_bytes)
         ):
             st.markdown("---")
             if st.button("🗑️ Yüklenen dosyayı sil ve baştan başla"):
