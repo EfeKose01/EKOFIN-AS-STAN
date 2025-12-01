@@ -1,5 +1,5 @@
-# app_finetune_rag.py — EkoFin Asistan
-# (Nihai Sürüm: Chatbot + RAG + Web Arama + Dosya Analizi + Güncellenmiş Arayüz)
+# app_finetune_rag.py — EkoFin Asistan (Nihai Sürüm)
+# Chatbot + RAG + Web Arama + Dosya Analizi + Teknik Analiz + Risk + Portföy + Güncellenmiş Arayüz
 
 import os
 import json
@@ -27,6 +27,11 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
+# Teknik analiz, risk ve portföy motorları
+from technical_engine import compute_technical_snapshot
+from risk_engine import risk_snapshot
+from portfolio_engine import parse_portfolio_text, portfolio_summary
+
 # --- PERSONA'LAR ---
 
 PERSONA_PROMPTS = {
@@ -45,7 +50,17 @@ Cevaplarını daima kaynaklarla destekle ve sonunda "Detaylı araştırma konula
 """,
     "Bankacı Asistanı": """Sen, bir Kurumsal Bilgi Asistanısın. Banka ürünleri ve prosedürleri hakkındaki sorulara öncelikle DAHİLİ BELGELERDEN yararlanarak doğru cevaplar ver.
 Cevabının sonunda, "İlgili diğer prosedürler:" başlığı altında EN AZ 3 adet devam sorusu öner.
-"""
+""",
+    "Trader Modu": """Sen, kısa vadeli fiyat hareketlerine odaklanan, disiplinli ama temkinli bir trader stilinde analiz yapan bir asistansın.
+Görevin, teknik göstergeleri (MA, EMA, ATR, Supertrend vb.) ve volatiliteyi kullanarak yapısal bir yorum sunmak.
+Asla 'al' veya 'sat' tavsiyesi verme; sadece senaryoları ve riskleri anlat.
+
+Cevap formatın:
+1. **Kısa Özet:** Hissenin genel kısa vadeli görünümünü 2–3 cümleyle açıkla (trend, momentum, risk).
+2. **Teknik Detaylar:** MA/EMA farkları, Supertrend yönü, volatilite gibi noktaları maddeler halinde özetle.
+3. **Riskler:** Özellikle volatilite, max drawdown, ani hareket riski gibi konuları vurgula.
+4. **İlgili diğer analizler:** başlığı altında EN AZ 3 tane devam sorusu öner (ör: '- Bu hisseyi portföy içinde nasıl konumlayabilirim?').
+""",
 }
 
 APP_NAME = "EkoFin Asistan"
@@ -123,8 +138,6 @@ def _fetch_single_symbol_close_series(yf_symbol: str):
     except Exception:
         return None
 
-
-# --- YENİ: INTRADAY İSTATİSTİK FONKSİYONU ---
 
 def get_intraday_stats(yf_symbol: str) -> Dict[str, float]:
     """
@@ -355,8 +368,6 @@ def web_search(query: str) -> Dict[str, Any]:
         return {"hata": f"Web araması sırasında genel bir hata oluştu: {e}"}
 
 
-# app_finetune_rag.py içinde bu fonksiyonu bul ve değiştir:
-
 def get_current_loan_rates(amount: int, term: int) -> Dict[str, Any]:
     print(f"--- CHROME TARAYICISI (HEADLESS) BAŞLATILDI: Tutar={amount}, Vade={term} ay ---")
     try:
@@ -438,6 +449,18 @@ def call_claude(messages: List[Dict[str, str]]) -> str:
         return "Üzgünüm, şu anda cevap veremiyorum. Lütfen daha sonra tekrar deneyin."
 
 
+# --- PORTFÖY WRAPPER ---
+
+def analyze_portfolio_wrapper(weights_text: str) -> Dict[str, Any]:
+    weights = parse_portfolio_text(weights_text)
+    if not weights:
+        return {
+            "hata": "Portföy tanımı çözümlenemedi. Örnek format:\n"
+                    "GARAN:0.3\nAKBNK:0.4\nTHYAO:0.3"
+        }
+    return portfolio_summary(weights)
+
+
 # --- TOOL ROUTER ---
 
 TOOLS = {
@@ -446,6 +469,9 @@ TOOLS = {
     "get_market_data": {"function": get_market_data, "required_params": ["symbols"]},
     "web_search": {"function": web_search, "required_params": ["query"]},
     "get_current_loan_rates": {"function": get_current_loan_rates, "required_params": ["amount", "term"]},
+    "analyze_technical": {"function": compute_technical_snapshot, "required_params": ["symbol"]},
+    "analyze_risk": {"function": risk_snapshot, "required_params": ["symbol"]},
+    "analyze_portfolio": {"function": analyze_portfolio_wrapper, "required_params": ["weights_text"]},
 }
 
 TOOL_SYSTEM_PROMPT = """Sen bir araç yönlendiricisin. Kullanıcının mesajını analiz et ve aşağıdaki araçlardan en uygununu, doğru parametrelerle `TOOL_CALL` formatında çağır. Başka hiçbir metin yazma.
@@ -456,11 +482,16 @@ TOOL_SYSTEM_PROMPT = """Sen bir araç yönlendiricisin. Kullanıcının mesajın
 - `web_search(query)`: "güncel", "en son", "son haber", "bugün", "bu sene", "hangi yıl" gibi kelimeler geçen sorular ile SPK, BDDK, TCMB, MERKEZ BANKASI, FED, ECB, TÜİK gibi kurumların SON kararları / haberleri sorulduğunda MUTLAKA kullanılmalıdır. `query` parametresi, doğrudan kullanıcının son mesajı olmalıdır.
 - `calculate_loan_payment(principal, annual_rate, years)`: Belirli bir faiz oranı verilerek kredi taksiti hesaplamak için.
 - `search_financial_documents(query)`: "Enflasyon nedir?", "müşteri sırrı nedir?" gibi teorik kavramlar veya dahili mevzuat bilgisinde kullanılır.
+- `analyze_technical(symbol)`: Kullanıcı, belirli bir hisse için MA, EMA, ATR, Supertrend gibi teknik özet istediğinde.
+- `analyze_risk(symbol)`: Kullanıcı, belirli bir hisse veya varlığın volatilite, max drawdown vb. risk profilini sorduğunda.
+- `analyze_portfolio(weights_text)`: Kullanıcı, birden fazla sembolden oluşan portföyünün performansını ve riskini görmek istediğinde. `weights_text` serbest metindir (GARAN:0.3, AKBNK:0.4, THYAO:0.3 gibi).
 
 **ÖNEMLİ KURALLAR:**
 - Eksik zorunlu parametre varsa, `TOOL_CALL` üretme. Bunun yerine, hangi parametrenin eksik olduğunu kullanıcıdan iste. SADECE `web_search` için istisna: Eğer `query` eksikse, query olarak doğrudan kullanıcının son mesajını kullan.
 - Kullanıcının sorusu GÜNCEL BİR OLAY/HABER içeriyorsa (özellikle SPK, BDDK, TCMB, FED, "en son", "güncel", "son karar", "hangi yıl" vb.), KESİNLİKLE `web_search` çağır. Asla modelin kendi bilgisiyle uydurma yapma.
 - `get_market_data` çıktısında bazı semboller için veri yoksa, yine de veri olan sembollerle analiz yapılabilir. Asla "karşılaştırma mümkün değildir" deme; hangi semboller için veri olmadığını belirt, ama mevcut verilerle karşılaştırma yap.
+- Kullanıcı 'portföy', 'sepet', 'dağılım', 'ağırlık', 'yüzde kaçını' gibi ifadelerle birden çok hisseyi birlikte soruyorsa `analyze_portfolio` aracını kullan.
+- Kullanıcı 'kısa vadeli teknik', 'trader gözüyle', 'destek/direnç', 'stop' gibi ifadeler kullanıyorsa `analyze_technical` ve gerekirse `analyze_risk` araçlarını tercih et.
 """
 
 
@@ -887,7 +918,7 @@ def run_streamlit_app() -> None:
     if "work_mode" not in st.session_state:
         st.session_state.work_mode = "Sohbet"
 
-    # --- Karşılama Mesajı (GÜNCELLENDİ) ---
+    # --- Karşılama Mesajı ---
     WELCOME_MESSAGE = (
         f"Merhaba! Ben {APP_NAME}. Bankacılık mevzuatı (BDDK), finansal piyasalar ve "
         "ekonomik gelişmeler konusunda size destek olmak için buradayım.\n\n"
@@ -905,8 +936,8 @@ def run_streamlit_app() -> None:
         st.title(f"💡 {APP_NAME}")
         st.session_state.work_mode = st.selectbox(
             "Çalışma Modu:",
-            options=["Sohbet", "Dosya Analizi"],
-            index=["Sohbet", "Dosya Analizi"].index(st.session_state.work_mode),
+            options=["Sohbet", "Dosya Analizi", "Portföy Takibi"],
+            index=["Sohbet", "Dosya Analizi", "Portföy Takibi"].index(st.session_state.work_mode),
         )
 
         if st.session_state.work_mode == "Sohbet":
@@ -917,8 +948,8 @@ def run_streamlit_app() -> None:
             )
         else:
             st.markdown(
-                "> Dosya Analizi modunda persona seçimi otomatik yapılır. "
-                "Özetler dokümanın içeriğine göre uygun bakış açısından yazılır."
+                "> Dosya Analizi ve Portföy Takibi modlarında persona seçimi otomatik/ikincil öneme sahiptir. "
+                "Sohbet modunda personayı doğrudan yönetebilirsiniz."
             )
 
         st.markdown("---")
@@ -1227,6 +1258,68 @@ def run_streamlit_app() -> None:
 
         return  # Dosya Analizi modunda sohbet kısmına inmiyoruz.
 
+    # --- PORTFÖY TAKİBİ MODU ---
+    if st.session_state.work_mode == "Portföy Takibi":
+        st.header("📊 Portföy Takibi ve Risk Analizi")
+
+        st.markdown(
+            """
+            Portföyünü şu formatta girebilirsin:
+
+            ```text
+            GARAN:0.3
+            AKBNK:0.4
+            THYAO:0.3
+            ```
+            veya
+
+            ```text
+            GARAN=0.3, AKBNK=0.4, THYAO=0.3
+            ```
+
+            Ağırlıkların toplamı otomatik normalize edilir (0.3+0.4+0.3 → 1.0).
+            """
+        )
+
+        text_input = st.text_area("Portföy tanımını yaz:", height=150)
+        period = st.selectbox("Analiz dönemi:", ["6mo", "1y", "2y"], index=1)
+
+        if st.button("Portföyü Analiz Et") and text_input.strip():
+            weights = parse_portfolio_text(text_input)
+            if not weights:
+                st.error("Portföy tanımı çözümlenemedi. Formatı kontrol et.")
+                return
+
+            with st.spinner("Portföy analizi yapılıyor..."):
+                summary = portfolio_summary(weights, period=period)
+
+            if "hata" in summary:
+                st.error(summary["hata"])
+                return
+
+            st.subheader("Özet Metrikler")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Toplam Dönem Getirisi", f"{summary['toplam_donem_getirisi_yuzde']:.2f}%")
+            c2.metric("Yıllık Getiri Tahmini", f"{summary['yillik_getiri_tahmini_yuzde']:.2f}%")
+            c3.metric("Yıllık Volatilite", f"{summary['yillik_volatilite_yuzde']:.2f}%")
+
+            c4, c5 = st.columns(2)
+            c4.metric("Max Drawdown", f"{summary['max_drawdown_yuzde']:.2f}%")
+            if summary["sharpe_benzeri_oran"] is not None:
+                c5.metric("Sharpe benzeri oran", f"{summary['sharpe_benzeri_oran']:.2f}")
+
+            st.markdown("**Ağırlıklar:**")
+            st.json(summary["agirliklar"])
+
+            st.markdown("**Sembol Bazlı Korelasyon Katkısı (portföyle):**")
+            st.json(summary["sembol_korelasyon_katkisi"])
+
+            st.info(
+                f"Analiz dönemi: {summary['tarih_araligi']['ilk_tarih']} - {summary['tarih_araligi']['son_tarih']}"
+            )
+
+        return  # Portföy modunda sohbet kısmına inmiyoruz.
+
     # --- SOHBET MODU ---
 
     st.header(f"Sohbet Modu: {st.session_state.active_persona}")
@@ -1247,7 +1340,6 @@ def run_streamlit_app() -> None:
                 if "suggestions" in msg:
                     last_suggestions = msg["suggestions"]
 
-    # --- GÜNCELLENMİŞ GİRİŞ BUTONLARI ---
     # Giriş ekranı butonları
     if len(active_chat_history) == 1:
         st.markdown("---")
