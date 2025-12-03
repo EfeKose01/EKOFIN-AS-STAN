@@ -1,5 +1,4 @@
-# app_finetune_rag.py — EkoFin Asistan (Nihai Sürüm)
-# Chatbot + RAG + Web Arama + Dosya Analizi + Teknik Analiz + Risk + Portföy + Güncellenmiş Arayüz
+# app_finetune_rag.py — EkoFin Asistan (Nihai Sürüm - Hallüsinasyon Azaltılmış)
 
 import os
 import json
@@ -62,6 +61,24 @@ Cevap formatın:
 4. **İlgili diğer analizler:** başlığı altında EN AZ 3 tane devam sorusu öner (ör: '- Bu hisseyi portföy içinde nasıl konumlayabilirim?').
 """,
 }
+
+# --- TÜM PERSONA'LAR İÇİN GENEL FİNANS GÜVENLİK KURALLARI EKİ ---
+
+FINANCE_SAFETY_SUFFIX = """
+GENEL FİNANS KURALLARI:
+- Güncel fiyat, seviye, oran gibi sayısal veriler konusunda asla kendi tahminini kullanma.
+- Hisse, döviz, kripto ve faiz oranları için verdiğin her sayısal bilgi mutlaka sistemdeki araçlardan
+  (get_market_data, analyze_technical, analyze_risk, analyze_portfolio, calculate_loan_payment vb.)
+  veya kullanıcının verdiği tablodan/veri setinden gelmelidir.
+- Eğer bu kaynaklarda ilgili veri yoksa, 'Bu konuda elimde sayısal veri yok, fiyat söyleyemem' de. Tahmin yapma.
+- 2023 sonrası için eğitim verin güncel olmayabilir. 2023 sonrasına dair tarih, düzenleme veya kurumsal karar bilgisi
+  verirken emin değilsen, 'Bu bilgi güncel olmayabilir' diye özellikle uyar ve asla tarih/karar uydurma.
+- Matematiksel hesaplamalarda (faiz, taksit, volatilite, Sharpe benzeri oranlar vb.) kendi kafandan hesaplamaya çalışmak yerine
+  mümkün olduğunda ilgili araçların çıkardığı sonuçları yorumla. Araç çıktısı yoksa, 'Bu hesabı doğrudan yapamıyorum' demeyi tercih et.
+"""
+
+for _k in list(PERSONA_PROMPTS.keys()):
+    PERSONA_PROMPTS[_k] = PERSONA_PROMPTS[_k] + "\n" + FINANCE_SAFETY_SUFFIX
 
 APP_NAME = "EkoFin Asistan"
 st.set_page_config(page_title=APP_NAME, page_icon="🤖", layout="wide")
@@ -489,9 +506,12 @@ TOOL_SYSTEM_PROMPT = """Sen bir araç yönlendiricisin. Kullanıcının mesajın
 **ÖNEMLİ KURALLAR:**
 - Eksik zorunlu parametre varsa, `TOOL_CALL` üretme. Bunun yerine, hangi parametrenin eksik olduğunu kullanıcıdan iste. SADECE `web_search` için istisna: Eğer `query` eksikse, query olarak doğrudan kullanıcının son mesajını kullan.
 - Kullanıcının sorusu GÜNCEL BİR OLAY/HABER içeriyorsa (özellikle SPK, BDDK, TCMB, FED, "en son", "güncel", "son karar", "hangi yıl" vb.), KESİNLİKLE `web_search` çağır. Asla modelin kendi bilgisiyle uydurma yapma.
+- Kullanıcı bir varlığın "şu anki fiyatı", "kaç TL", "kaç para", "değeri ne", "şu anda ne kadar", "güncel fiyat" gibi soruları sorarsa, KESİNLİKLE `get_market_data` aracını çağır. Modelin kendi eğitim bilgisindeki fiyatları KULLANMA.
+- Hisse, döviz veya kripto fiyatı içeren hiçbir soruya araç çağırmadan doğrudan cevap verme.
 - `get_market_data` çıktısında bazı semboller için veri yoksa, yine de veri olan sembollerle analiz yapılabilir. Asla "karşılaştırma mümkün değildir" deme; hangi semboller için veri olmadığını belirt, ama mevcut verilerle karşılaştırma yap.
 - Kullanıcı 'portföy', 'sepet', 'dağılım', 'ağırlık', 'yüzde kaçını' gibi ifadelerle birden çok hisseyi birlikte soruyorsa `analyze_portfolio` aracını kullan.
 - Kullanıcı 'kısa vadeli teknik', 'trader gözüyle', 'destek/direnç', 'stop' gibi ifadeler kullanıyorsa `analyze_technical` ve gerekirse `analyze_risk` araçlarını tercih et.
+- Matematiksel hesaplama gerektiren sorularda (faiz, taksit, volatilite, getiri, Sharpe benzeri oranlar vb.) mümkün olduğunca yukarıdaki araçları kullan; asla kendi başına tahmini hesaplama yapma.
 """
 
 
@@ -505,15 +525,34 @@ def run_tool_calling_logic(chat_history: List[Dict[str, Any]], persona: str) -> 
     lower = last_user_msg.lower()
 
     analysis_triggers = [
+        # Daha agresif tetikleyici liste: fiyat/hisse sorularını mutlaka yakala
         "grafik",
         "karşılaştır",
         "karşılaştırma",
         "performans",
         "yıllık",
+        "yıllık getiri",
         "fiyat",
+        "fiyatı",
+        "güncel fiyat",
+        "şu anki fiyat",
+        "şu an ne kadar",
+        "şu anda ne kadar",
+        "kaç tl",
+        "kaç para",
+        "değeri ne",
+        "hisse",
+        "lot",
+        "endeks",
+        "borsa",
+        "trend",
         "teknik",
         "analiz",
-        "hisse",
+        "usd",
+        "eur",
+        "dolar",
+        " tl",
+        "₺",
     ]
 
     news_triggers = [
@@ -548,6 +587,12 @@ def run_tool_calling_logic(chat_history: List[Dict[str, Any]], persona: str) -> 
 
     should_force_market = any(t in lower for t in analysis_triggers)
     should_force_news = any(t in lower for t in news_triggers)
+
+    # Ek güvenlik: Sembol + fiyat sorusu paterni yakala
+    symbol_like_tokens = re.findall(r"\b[A-ZÇĞİÖŞÜ]{3,5}\b", last_user_msg.upper())
+    price_keywords = ["kaç tl", "kaç para", "ne kadar", "güncel fiyat", "şu an", "şu anda"]
+    if symbol_like_tokens and any(pk in lower for pk in price_keywords):
+        should_force_market = True
 
     messages_for_tool_choice = [{"role": "system", "content": TOOL_SYSTEM_PROMPT}] + chat_history
     tool_call_str = call_claude(messages_for_tool_choice)
@@ -628,7 +673,8 @@ SENİN GÖREVİN:
                         "role": "assistant",
                         "content": (
                             "Kısa vadeli fiyat / grafik analizi yapabilmem için hangi hisse senedi veya endeks "
-                            "için strateji istediğinizi belirtir misiniz? Örn: GARAN, THYAO, BIST100."
+                            "için bilgi istediğinizi belirtir misiniz? Örn: GARAN, THYAO, BIST100. "
+                            "Fiyat, seviye veya destek/direnç söyleyebilmem için mutlaka sembol bilmem gerekiyor."
                         ),
                     }
                 )
@@ -660,12 +706,13 @@ SENİN GÖREVİN:
 ---
 SENİN GÖREVİN:
 1. Bu sonucu analiz et ve kullanıcıya net, tutarlı bir cevap oluştur.
-2. Eğer JSON içinde 'gunluk_en_dusuk' ve 'gunluk_en_yuksek' alanları varsa, kısa vadeli destek ve direnç seviyelerini bu sayılara DAYANDIR. Bu aralığın biraz içini veya çevresini kullanabilirsin ama kesinlikle bambaşka fiyat seviyeleri uydurma.
-3. Özellikle '1 günlük grafikte' veya 'gün içi' ifadesi geçiyorsa, yorumlarında önceliği bu günlük aralık ve volatilite bilgisine ver.
+2. Eğer JSON içinde 'guncel_fiyat', 'gunluk_en_dusuk' ve 'gunluk_en_yuksek' alanları varsa, kısa vadeli destek ve direnç seviyelerini bu sayılara DAYANDIR. Bu aralığın biraz içini veya çevresini kullanabilirsin ama kesinlikle bambaşka fiyat seviyeleri uydurma.
+3. Özellikle '1 günlük grafikte', 'gün içi' veya 'şu an kaç TL' gibi ifadeler geçiyorsa, yorumlarında önceliği bu günlük aralık ve volatilite bilgisine ver.
 4. Cevabını, sana atanan kimliğin (persona) gerektirdiği formata uygun şekilde, sonunda EN AZ 3 adet devam sorusu önererek tamamla.
 5. Eğer bazı semboller için veri yoksa, bunu belirt ama veri olan semboller üzerinden mutlaka analiz yap.
-6. Bu uygulamada sadece kapanış fiyatları ve bunlardan türetilen yüzdesel değişimler ve basit karşılaştırmalar kullanılabilir.
+6. Bu uygulamada sadece gerçek fiyat verisi ve bunlardan türetilen yüzdesel değişimler ve basit karşılaştırmalar kullanılabilir.
 7. RSI, hacim, 50/200 günlük ortalama vb. teknik göstergeler için SAYISAL değeri veya yüzdesel değişimi UYDURMA; bu göstergeler için sadece fiyat ve yüzdesel değişim üzerinden yorum yapabileceğini açıkla.
+8. Kendi eğitimindeki (örn. 2023 tarihli) eski fiyatları KULLANMA; sadece bu araçtan gelen güncel veriyi esas al.
 """
 
             history_without_last_prompt = chat_history[:-1]
@@ -768,12 +815,13 @@ SENİN GÖREVİN:
 ---
 SENİN GÖREVİN:
 1. Bu sonucu analiz et ve kullanıcıya net bir cevap oluştur.
-2. Eğer JSON içinde 'gunluk_en_dusuk' ve 'gunluk_en_yuksek' alanları varsa, kısa vadeli destek ve direnç seviyelerini bu sayılara DAYANDIR. Bu aralığın biraz içini veya çevresini kullanabilirsin ama kesinlikle bambaşka fiyat seviyeleri uydurma.
+2. Eğer JSON içinde 'guncel_fiyat', 'gunluk_en_dusuk' ve 'gunluk_en_yuksek' alanları varsa, kısa vadeli destek ve direnç seviyelerini bu sayılara DAYANDIR. Bu aralığın biraz içini veya çevresini kullanabilirsin ama kesinlikle bambaşka fiyat seviyeleri uydurma.
 3. Özellikle '1 günlük grafikte' veya 'gün içi' ifadesi geçiyorsa, yorumlarında önceliği bu günlük aralık ve volatilite bilgisine ver.
 4. Cevabını, sana atanan kimliğin (persona) gerektirdiği formata uygun şekilde, sonunda EN AZ 3 adet devam sorusu önererek tamamla.
 5. Araç çıktısında bazı semboller için veri yoksa, yine de veri olan semboller üzerinden analiz yap ve eksik sembolleri ayrıca belirt.
 6. Bu uygulamada sadece kapanış fiyatları ve bunlardan türetilen yüzdesel değişimler ve basit karşılaştırmalar kullanılabilir.
 7. RSI, hacim, 50/200 günlük ortalama vb. teknik göstergeler için SAYISAL değeri veya yüzdesel değişimi UYDURMA; bu göstergeler sorulursa yalnızca fiyat hareketi ve yüzdesel değişim üzerinden yorum yapabileceğini açıkla.
+8. Kendi eğitimindeki eski fiyatları ve 2023 civarı dahili bilgileri fiyat olarak KULLANMA; sadece araçtan gelen verilerle konuş.
 """
 
     history_without_last_prompt = chat_history[:-1]
