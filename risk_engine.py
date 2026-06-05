@@ -18,11 +18,18 @@ def _fetch_close_series(yf_symbol: str, period: str = "1y") -> pd.Series:
     )
     if data is None or data.empty:
         return pd.Series(dtype=float)
+    # MultiIndex sütunları düzleştir
+    if isinstance(data.columns, pd.MultiIndex):
+        data.columns = data.columns.get_level_values(0)
     try:
         data.index = data.index.tz_localize(None)
     except Exception:
         pass
-    return data["Close"].dropna()
+    close = data["Close"].dropna()
+    # Tek sütunlu DataFrame gelirse Series'e dönüştür
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]
+    return close
 
 
 def _max_drawdown(series: pd.Series) -> float:

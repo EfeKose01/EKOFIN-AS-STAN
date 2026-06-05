@@ -20,45 +20,61 @@ import yfinance as yf
 import PyPDF2
 import io
 
-# Web Otomasyonu (kredi oranları aracı için)
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+# Selenium kaldırıldı — Streamlit Cloud'da Chrome binary yok.
+# get_current_loan_rates yerine kullanıcı web_search ile BDDK/hangikredi yönlendirilir.
 
 # Teknik analiz, risk ve portföy motorları
 from technical_engine import compute_technical_snapshot
 from risk_engine import risk_snapshot
 from portfolio_engine import parse_portfolio_text, portfolio_summary
+from fundamental_engine import fundamental_snapshot
+
+# Güncel mevzuat/haber toplayıcı
+from news_scraper import run_scraper, SOURCE_MAP
 
 # --- PERSONA'LAR ---
 
 PERSONA_PROMPTS = {
-    "Genel Asistan": """Sen, EkoFin Asistan adında, Türkiye ekonomisi ve finans piyasaları konusunda geniş bilgiye sahip, yardımcı ve objektif bir yapay zeka asistanısın.
-Görevin, sana sunulan araç sonuçlarını ve verileri kullanarak kullanıcının sorusuna net ve anlaşılır bir cevap vermek. Asla yatırım tavsiyesi verme.
-
-CEVAP FORMATIN ŞU ŞEKİLDE OLMALI:
-1.  **Ana Cevap:** Kullanıcının sorusuna doğrudan, veriye dayalı ve net bir yanıt ver.
-2.  **Öneriler:** Cevabınla ilgili olarak kullanıcının merak edebileceği EN AZ 3 adet devam sorusu öner. Bu soruları her zaman "Şunları da merak edebilirsiniz:" başlığı altında, liste formatında ('- Soru 1') sun.
-""",
-    "Teknik Analist": """Sen, bir Borsa Teknik Analistisin. Görevin, sadece hisse senetleri ve endekslerin grafiklerini ve teknik göstergelerini yorumlamak. Veri odaklı, kısa, net ve objektif ol. Asla "al" veya "sat" deme.
-Cevabının sonunda, "İlgili diğer analizler:" başlığı altında EN AZ 3 adet devam sorusu öner. Örn: '- Bu hissenin hacim analizini yapabilir misin?'
-""",
-    "Temel Analist / Araştırmacı": """Sen, bir Finansal Araştırmacı ve Temel Analistsin. Bir hissenin veya endeksin arkasındaki temel dinamikleri analiz et.
-Cevaplarını daima kaynaklarla destekle ve sonunda "Detaylı araştırma konuları:" başlığı altında EN AZ 3 adet devam sorusu öner.
-""",
-    "Bankacı Asistanı": """Sen, bir Kurumsal Bilgi Asistanısın. Banka ürünleri ve prosedürleri hakkındaki sorulara öncelikle DAHİLİ BELGELERDEN yararlanarak doğru cevaplar ver.
-Cevabının sonunda, "İlgili diğer prosedürler:" başlığı altında EN AZ 3 adet devam sorusu öner.
-""",
-    "Trader Modu": """Sen, kısa vadeli fiyat hareketlerine odaklanan, disiplinli ama temkinli bir trader stilinde analiz yapan bir asistansın.
-Görevin, teknik göstergeleri (MA, EMA, ATR, Supertrend vb.) ve volatiliteyi kullanarak yapısal bir yorum sunmak.
-Asla 'al' veya 'sat' tavsiyesi verme; sadece senaryoları ve riskleri anlat.
+    "Genel Asistan": """Sen EkoFin Asistan adında, Türkiye ekonomisi ve finans piyasaları konusunda geniş bilgiye sahip, yardımcı ve objektif bir yapay zeka asistanısın.
+Görevin, araç sonuçlarını ve verileri kullanarak kullanıcının sorusuna net ve anlaşılır bir yanıt vermek. Asla yatırım tavsiyesi verme.
 
 Cevap formatın:
-1. **Kısa Özet:** Hissenin genel kısa vadeli görünümünü 2–3 cümleyle açıkla (trend, momentum, risk).
-2. **Teknik Detaylar:** MA/EMA farkları, Supertrend yönü, volatilite gibi noktaları maddeler halinde özetle.
-3. **Riskler:** Özellikle volatilite, max drawdown, ani hareket riski gibi konuları vurgula.
-4. **İlgili diğer analizler:** başlığı altında EN AZ 3 tane devam sorusu öner (ör: '- Bu hisseyi portföy içinde nasıl konumlayabilirim?').
+1. **Ana Yanıt:** Kullanıcının sorusuna doğrudan, veriye dayalı ve öz bir yanıt ver.
+2. **Şunları da merak edebilirsiniz:** başlığı altında EN AZ 3 devam sorusu öner (liste formatında, '- Soru' şeklinde).
+""",
+
+    "Analist Modu": """Sen EkoFin Asistan'ın Analist modusun. Hem teknik hem temel analizi bir arada kullanarak yorum yaparsın.
+
+**Teknik boyut:** MA/EMA, ATR, Supertrend gibi göstergeleri yorumla; trend yönü, momentum ve volatilite hakkında net bir tablo çiz.
+**Temel boyut:** Sektör dinamikleri, makro bağlam, bilanço kalitesi ve değerleme çerçevesini göz önünde bulundur.
+**Kural:** Asla "al" veya "sat" deme. Senaryoları ve riskleri anlat.
+
+Cevap formatın:
+1. **Özet Görünüm:** 2–3 cümleyle genel tablo (trend + temel bağlam).
+2. **Teknik Bulgular:** Gösterge bazlı maddeler (MA/EMA pozisyonu, Supertrend yönü, ATR seviyesi, volatilite).
+3. **Temel Bağlam:** Sektör, makro ortam veya şirkete dair öne çıkan nokta.
+4. **Riskler:** Öne çıkan teknik ve temel riskler.
+5. **İlgili diğer analizler:** başlığı altında EN AZ 3 devam sorusu öner.
+""",
+
+    "Mevzuat Asistanı": """Sen EkoFin Asistan'ın Mevzuat modusun. BDDK, SPK, TCMB ve ilgili Türk finans mevzuatı konularında uzmanlaşmış bir bilgi asistanısın.
+
+Öncelik sıran:
+1. Dahili RAG belgeleri (tebliğler, yönetmelikler, genelgeler) — bunlar birincil kaynağın.
+2. Web araması — güncel değişiklik veya son kararlar için.
+3. Eğitim bilgin — yalnızca genel çerçeve ve kavram açıklamaları için; tarih veya karar uydurma.
+
+**Yanıt kuralları:**
+- Her sayısal sınır, oran veya kural için kaynağını belirt (tebliğ adı, madde numarası varsa).
+- Bilginin RAG belgelerinden mi, web aramasından mı, yoksa genel eğitimden mi geldiğini parantez içinde kısaca işaretle.
+- Güncel olmayabilecek bilgilerde açıkça uyar: "Bu bilgi güncel olmayabilir, ilgili kurumun resmi sitesini kontrol edin."
+- Yoruma değil kurala odaklan; hukuki tavsiye verme.
+
+Cevap formatın:
+1. **Kural / Hüküm:** İlgili mevzuat maddesini veya gereksinimi özetle.
+2. **Kaynak:** Hangi tebliğ / yönetmelik / karar (tarih varsa belirt).
+3. **Pratik Uygulama:** Kuralın pratikte ne anlama geldiğini bir paragrafla açıkla.
+4. **İlgili diğer mevzuat konuları:** başlığı altında EN AZ 3 devam sorusu öner.
 """,
 }
 
@@ -84,6 +100,24 @@ APP_NAME = "EkoFin Asistan"
 st.set_page_config(page_title=APP_NAME, page_icon="🤖", layout="wide")
 
 
+@st.cache_resource
+def load_bist_tickers() -> set:
+    """bist_tickers.txt'den geçerli BIST sembollerini yükler (örn: GARAN.IS → GARAN)."""
+    path = "bist_tickers.txt"
+    if not os.path.exists(path):
+        return set()
+    with open(path, "r", encoding="utf-8") as f:
+        tickers = set()
+        for line in f:
+            t = line.strip().upper().replace(".IS", "")
+            if t:
+                tickers.add(t)
+    return tickers
+
+
+BIST_TICKERS: set = set()  # run_streamlit_app içinde doldurulur
+
+
 def load_dotenv(path: str = ".env"):
     if not os.path.exists(path):
         return
@@ -101,6 +135,18 @@ def load_dotenv(path: str = ".env"):
 
 
 load_dotenv(".env")
+
+# Streamlit Secrets'tan anahtarları ortam değişkenlerine aktar (Streamlit Cloud uyumluluğu)
+def _load_streamlit_secrets():
+    try:
+        for key in ["ANTHROPIC_API_KEY", "SERPER_API_KEY"]:
+            val = st.secrets.get(key)
+            if val and not os.environ.get(key):
+                os.environ[key] = val
+    except Exception:
+        pass  # st.secrets yoksa (lokal geliştirme) sessizce devam et
+
+_load_streamlit_secrets()
 
 # --- RAG İndeksi ---
 
@@ -123,6 +169,26 @@ if os.path.exists(FAISS_INDEX_PATH) and os.path.exists(CONTENT_MAP_PATH):
 else:
     st.error("RAG indeks dosyaları bulunamadı. Lütfen önce `python create_index.py` komutunu çalıştırın.")
     st.stop()
+
+
+# --- Yardımcı Fonksiyonlar ---
+
+def _update_stock_session_state(symbols_str: str, result: Dict[str, Any]) -> None:
+    """get_market_data sonucunu st.session_state'e yazar (cache ile uyumsuz olduğu için ayrı)."""
+    gecerli = result.get("gecerli_semboller") or (
+        [result["sembol"]] if "sembol" in result else []
+    )
+    if not gecerli:
+        return
+
+    chart_records = result.get("_chart_records")
+    if chart_records:
+        history_df = pd.DataFrame.from_dict(chart_records, orient="index")
+        history_df.index = pd.to_datetime(history_df.index)
+        st.session_state.stock_history = history_df
+
+    st.session_state.stock_company_name = ", ".join(gecerli)
+    st.session_state.last_symbols = gecerli
 
 
 # --- Araç Fonksiyonları ---
@@ -156,6 +222,7 @@ def _fetch_single_symbol_close_series(yf_symbol: str):
         return None
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def get_intraday_stats(yf_symbol: str) -> Dict[str, float]:
     """
     Tek bir sembol için son 1 günlük (intraday) temel istatistikleri döner.
@@ -177,10 +244,14 @@ def get_intraday_stats(yf_symbol: str) -> Dict[str, float]:
         except Exception:
             pass
 
-        day_low = float(intraday["Low"].min())
-        day_high = float(intraday["High"].max())
-        day_close = float(intraday["Close"].iloc[-1])
-        day_open = float(intraday["Open"].iloc[0])
+        # MultiIndex sütunları düzleştir (yfinance tek sembol için de MultiIndex gönderebilir)
+        if isinstance(intraday.columns, pd.MultiIndex):
+            intraday.columns = intraday.columns.get_level_values(0)
+
+        day_low   = float(intraday["Low"].min().iloc[0]   if hasattr(intraday["Low"].min(),   "iloc") else intraday["Low"].min())
+        day_high  = float(intraday["High"].max().iloc[0]  if hasattr(intraday["High"].max(),  "iloc") else intraday["High"].max())
+        day_close = float(intraday["Close"].iloc[-1].iloc[0] if hasattr(intraday["Close"].iloc[-1], "iloc") else intraday["Close"].iloc[-1])
+        day_open  = float(intraday["Open"].iloc[0].iloc[0]  if hasattr(intraday["Open"].iloc[0],  "iloc") else intraday["Open"].iloc[0])
 
         intraday_range = day_high - day_low
         vol_pct = (intraday_range / day_open * 100) if day_open != 0 else 0.0
@@ -196,6 +267,7 @@ def get_intraday_stats(yf_symbol: str) -> Dict[str, float]:
         return {}
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def get_market_data(symbols: str) -> Dict[str, Any]:
     """
     Bir veya daha fazla sembol için fiyat geçmişini çeker.
@@ -282,9 +354,7 @@ def get_market_data(symbols: str) -> Dict[str, Any]:
     comparison_df = pd.DataFrame(valid_cols)
     comparison_df = comparison_df.ffill()
 
-    st.session_state.stock_history = comparison_df
-    st.session_state.stock_company_name = ", ".join(valid_cols.keys())
-    st.session_state.last_symbols = list(comparison_df.columns)
+    # Not: st.session_state yazımları cache ile uyumsuz; çağıran taraf günceller.
 
     stats: Dict[str, Dict[str, str]] = {}
     for col in comparison_df.columns:
@@ -332,6 +402,10 @@ def get_market_data(symbols: str) -> Dict[str, Any]:
 
         if uyari_parts:
             result["uyari"] = " ".join(uyari_parts)
+        # Grafik için seri verisi (ISO tarih → fiyat dict)
+        result["_chart_records"] = {
+            str(k): v for k, v in comparison_df.to_dict(orient="index").items()
+        }
         return result
 
     # --- ÇOKLU SEMBOL DURUMU: karşılaştırma özeti ---
@@ -346,6 +420,10 @@ def get_market_data(symbols: str) -> Dict[str, Any]:
         "gecerli_semboller": list(comparison_df.columns),
         "gecersiz_semboller": empty_symbols,
         "istatistikler": stats,
+        # Grafik için seri verisi
+        "_chart_records": {
+            str(k): v for k, v in comparison_df.to_dict(orient="index").items()
+        },
     }
     if uyari_parts:
         response["uyari"] = " ".join(uyari_parts)
@@ -386,42 +464,19 @@ def web_search(query: str) -> Dict[str, Any]:
 
 
 def get_current_loan_rates(amount: int, term: int) -> Dict[str, Any]:
-    print(f"--- CHROME TARAYICISI (HEADLESS) BAŞLATILDI: Tutar={amount}, Vade={term} ay ---")
-    try:
-        # --- LINUX/STREAMLIT CLOUD UYUMLU AYARLAR ---
-        chrome_options = webdriver.ChromeOptions()
-        chrome_options.add_argument("--headless")  # Arayüz olmadan çalış
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--disable-gpu")
-
-        # Streamlit Cloud'da driver otomatik bulunur, path vermeye gerek yok
-        driver = webdriver.Chrome(options=chrome_options)
-
-        url = f"https://www.hangikredi.com/kredi/ihtiyac-kredisi?amount={amount}&term={term}"
-        driver.get(url)
-        wait = WebDriverWait(driver, 20)
-        wait.until(EC.presence_of_element_located((By.XPATH, "//table[contains(@class, 'offer-table')]//tbody/tr")))
-        offers = driver.find_elements(By.XPATH, "//table[contains(@class, 'offer-table')]//tbody/tr")
-        results = []
-        for offer in offers[:5]:
-            try:
-                bank_name = offer.find_element(
-                    By.XPATH, ".//div[contains(@class, 'bank-logo')]//img"
-                ).get_attribute("alt")
-                interest_rate = offer.find_element(By.XPATH, ".//td[2]/div").text
-                monthly_payment = offer.find_element(By.XPATH, ".//td[3]/div").text
-                results.append(
-                    {"banka": bank_name, "aylik_faiz_orani": interest_rate, "aylik_taksit": monthly_payment}
-                )
-            except Exception:
-                continue
-        driver.quit()
-        if not results:
-            return {"hata": "HangiKredi sitesinden kredi teklifleri alınamadı, site yapısı değişmiş olabilir."}
-        return {"kredi_teklifleri": results}
-    except Exception as e:
-        return {"hata": f"Web otomasyonu sırasında hata oluştu (Linux/Chrome): {e}"}
+    """
+    Gerçek zamanlı kredi oranı karşılaştırması şu an kullanılamıyor.
+    Kullanıcıyı web_search ile BDDK/hangikredi.com'a yönlendir.
+    """
+    return {
+        "hata": "Güncel kredi oranı karşılaştırması şu an bu platformda desteklenmiyor.",
+        "oneri": (
+            f"Güncel ihtiyaç kredisi oranlarını karşılaştırmak için "
+            f"hangikredi.com veya BDDK'nın resmi faiz tablosunu ziyaret edebilirsiniz. "
+            f"İsterseniz web araması yapabilirim: "
+            f"'{amount} TL {term} ay ihtiyaç kredisi faiz oranları 2025' gibi."
+        ),
+    }
 
 
 # --- LLM Katmanı ---
@@ -452,7 +507,7 @@ def call_claude(messages: List[Dict[str, str]]) -> str:
         else:
             user_assistant_messages.append(clean_msg)
     payload = {
-        "model": "claude-3-haiku-20240307",
+        "model": "claude-haiku-4-5-20251001",
         "max_tokens": 2048,
         "system": system_prompt,
         "messages": user_assistant_messages,
@@ -469,49 +524,64 @@ def call_claude(messages: List[Dict[str, str]]) -> str:
 # --- PORTFÖY WRAPPER ---
 
 def analyze_portfolio_wrapper(weights_text: str) -> Dict[str, Any]:
+    import re as _re
+    # Girilen ham toplamı hesapla (normalleştirmeden önce)
+    raw_values = [float(v) for v in _re.findall(r"[:\=]\s*([\d\.]+)", weights_text) if v]
+    raw_total = sum(raw_values) if raw_values else 0.0
+
     weights = parse_portfolio_text(weights_text)
     if not weights:
         return {
             "hata": "Portföy tanımı çözümlenemedi. Örnek format:\n"
                     "GARAN:0.3\nAKBNK:0.4\nTHYAO:0.3"
         }
-    return portfolio_summary(weights)
+    result = portfolio_summary(weights)
+
+    # Normalleştirme uyarısı: giriş toplamı 1.0'dan farklıysa bildir
+    if raw_total > 0 and abs(raw_total - 1.0) > 0.01:
+        result["normalizasyon_uyarisi"] = (
+            f"Girilen ağırlıklar toplamı {raw_total:.2f} idi; "
+            f"analiz için otomatik olarak 1.00'a normalize edildi."
+        )
+    return result
 
 
 # --- TOOL ROUTER ---
 
 TOOLS = {
-    "calculate_loan_payment": {"function": loan_payment, "required_params": ["principal", "annual_rate", "years"]},
-    "search_financial_documents": {"function": search_documents, "required_params": ["query"]},
-    "get_market_data": {"function": get_market_data, "required_params": ["symbols"]},
-    "web_search": {"function": web_search, "required_params": ["query"]},
-    "get_current_loan_rates": {"function": get_current_loan_rates, "required_params": ["amount", "term"]},
-    "analyze_technical": {"function": compute_technical_snapshot, "required_params": ["symbol"]},
-    "analyze_risk": {"function": risk_snapshot, "required_params": ["symbol"]},
-    "analyze_portfolio": {"function": analyze_portfolio_wrapper, "required_params": ["weights_text"]},
+    "calculate_loan_payment":    {"function": loan_payment,              "required_params": ["principal", "annual_rate", "years"]},
+    "search_financial_documents":{"function": search_documents,          "required_params": ["query"]},
+    "get_market_data":           {"function": get_market_data,           "required_params": ["symbols"]},
+    "web_search":                {"function": web_search,                "required_params": ["query"]},
+    "get_current_loan_rates":    {"function": get_current_loan_rates,    "required_params": ["amount", "term"]},
+    "analyze_technical":         {"function": compute_technical_snapshot,"required_params": ["symbol"]},
+    "analyze_risk":              {"function": risk_snapshot,             "required_params": ["symbol"]},
+    "analyze_fundamental":       {"function": fundamental_snapshot,      "required_params": ["symbol"]},
+    "analyze_portfolio":         {"function": analyze_portfolio_wrapper, "required_params": ["weights_text"]},
 }
 
-TOOL_SYSTEM_PROMPT = """Sen bir araç yönlendiricisin. Kullanıcının mesajını analiz et ve aşağıdaki araçlardan en uygununu, doğru parametrelerle `TOOL_CALL` formatında çağır. Başka hiçbir metin yazma.
+TOOL_SYSTEM_PROMPT = """Sen bir araç yönlendiricisin. Kullanıcının mesajını analiz et ve en uygun aracı `TOOL_CALL` formatında çağır. Başka hiçbir metin yazma.
 
 # Araçlar
-- `get_current_loan_rates(amount, term)`: Kullanıcı, bankaların GÜNCEL ihtiyaç kredisi faiz oranlarını karşılaştırmalı olarak istediğinde kullanılır.
-- `get_market_data(symbols)`: Bir veya daha fazla hisse senedini (GARAN, THYAO), forex'i (EUR/USD) veya kriptoyu (BTC/USD) karşılaştırmalı olarak analiz etmek veya grafiğini çizmek için kullanılır. Semboller virgülle ayrılmalıdır.
-- `web_search(query)`: "güncel", "en son", "son haber", "bugün", "bu sene", "hangi yıl" gibi kelimeler geçen sorular ile SPK, BDDK, TCMB, MERKEZ BANKASI, FED, ECB, TÜİK gibi kurumların SON kararları / haberleri sorulduğunda MUTLAKA kullanılmalıdır. `query` parametresi, doğrudan kullanıcının son mesajı olmalıdır.
-- `calculate_loan_payment(principal, annual_rate, years)`: Belirli bir faiz oranı verilerek kredi taksiti hesaplamak için.
-- `search_financial_documents(query)`: "Enflasyon nedir?", "müşteri sırrı nedir?" gibi teorik kavramlar veya dahili mevzuat bilgisinde kullanılır.
-- `analyze_technical(symbol)`: Kullanıcı, belirli bir hisse için MA, EMA, ATR, Supertrend gibi teknik özet istediğinde.
-- `analyze_risk(symbol)`: Kullanıcı, belirli bir hisse veya varlığın volatilite, max drawdown vb. risk profilini sorduğunda.
-- `analyze_portfolio(weights_text)`: Kullanıcı, birden fazla sembolden oluşan portföyünün performansını ve riskini görmek istediğinde. `weights_text` serbest metindir (GARAN:0.3, AKBNK:0.4, THYAO:0.3 gibi).
+- `get_market_data(symbols)`: Bir veya daha fazla hisse/forex/kripto için fiyat geçmişi ve normalize grafik. Semboller virgülle ayrılır.
+- `analyze_technical(symbol)`: Tek sembol için kapsamlı teknik analiz — RSI, MACD, Bollinger, MA/EMA, ATR, Supertrend, OBV, destek/direnç.
+- `analyze_risk(symbol)`: Tek sembol için risk metrikleri — yıllık volatilite, max drawdown, Sharpe benzeri oran.
+- `analyze_fundamental(symbol)`: Tek sembol için temel analiz — F/K, P/DD, ROE, kâr marjı, temettü verimi, borç/özsermaye, piyasa değeri.
+- `analyze_portfolio(weights_text)`: Çok hisseli portföy analizi. `weights_text` serbest metin (GARAN:0.3, AKBNK:0.4).
+- `web_search(query)`: "güncel", "en son", "son haber", "bugün", SPK/BDDK/TCMB/FED/TÜİK haberleri için. `query` = kullanıcının son mesajı.
+- `search_financial_documents(query)`: Dahili mevzuat/kavram sorguları için.
+- `calculate_loan_payment(principal, annual_rate, years)`: Kredi taksit hesabı.
+- `get_current_loan_rates(amount, term)`: Güncel ihtiyaç kredisi oranları.
 
-**ÖNEMLİ KURALLAR:**
-- Eksik zorunlu parametre varsa, `TOOL_CALL` üretme. Bunun yerine, hangi parametrenin eksik olduğunu kullanıcıdan iste. SADECE `web_search` için istisna: Eğer `query` eksikse, query olarak doğrudan kullanıcının son mesajını kullan.
-- Kullanıcının sorusu GÜNCEL BİR OLAY/HABER içeriyorsa (özellikle SPK, BDDK, TCMB, FED, "en son", "güncel", "son karar", "hangi yıl" vb.), KESİNLİKLE `web_search` çağır. Asla modelin kendi bilgisiyle uydurma yapma.
-- Kullanıcı bir varlığın "şu anki fiyatı", "kaç TL", "kaç para", "değeri ne", "şu anda ne kadar", "güncel fiyat" gibi soruları sorarsa, KESİNLİKLE `get_market_data` aracını çağır. Modelin kendi eğitim bilgisindeki fiyatları KULLANMA.
-- Hisse, döviz veya kripto fiyatı içeren hiçbir soruya araç çağırmadan doğrudan cevap verme.
-- `get_market_data` çıktısında bazı semboller için veri yoksa, yine de veri olan sembollerle analiz yapılabilir. Asla "karşılaştırma mümkün değildir" deme; hangi semboller için veri olmadığını belirt, ama mevcut verilerle karşılaştırma yap.
-- Kullanıcı 'portföy', 'sepet', 'dağılım', 'ağırlık', 'yüzde kaçını' gibi ifadelerle birden çok hisseyi birlikte soruyorsa `analyze_portfolio` aracını kullan.
-- Kullanıcı 'kısa vadeli teknik', 'trader gözüyle', 'destek/direnç', 'stop' gibi ifadeler kullanıyorsa `analyze_technical` ve gerekirse `analyze_risk` araçlarını tercih et.
-- Matematiksel hesaplama gerektiren sorularda (faiz, taksit, volatilite, getiri, Sharpe benzeri oranlar vb.) mümkün olduğunca yukarıdaki araçları kullan; asla kendi başına tahmini hesaplama yapma.
+**KURALLAR:**
+- Fiyat sorusu → `get_market_data`. Model kendi bilgisinden fiyat verme.
+- Teknik göstergeler (RSI, MA, MACD, Bollinger, Supertrend, destek/direnç) → `analyze_technical`.
+- Risk metrikleri (volatilite, drawdown, Sharpe) → `analyze_risk`.
+- Temel analiz (F/K, ROE, temettü, bilanço) → `analyze_fundamental`.
+- Güncel haber/karar/düzenleme → `web_search`.
+- Portföy sorusu → `analyze_portfolio`.
+- Eksik zorunlu parametre varsa TOOL_CALL üretme, parametreyi kullanıcıdan iste.
+- `web_search` için query eksikse kullanıcının son mesajını kullan.
 """
 
 
@@ -594,6 +664,10 @@ def run_tool_calling_logic(chat_history: List[Dict[str, Any]], persona: str) -> 
     if symbol_like_tokens and any(pk in lower for pk in price_keywords):
         should_force_market = True
 
+    # Mevzuat Asistanı'nda piyasa/fiyat araması devre dışı — kapsam dışı soruları reddet
+    if persona == "Mevzuat Asistanı":
+        should_force_market = False
+
     messages_for_tool_choice = [{"role": "system", "content": TOOL_SYSTEM_PROMPT}] + chat_history
     tool_call_str = call_claude(messages_for_tool_choice)
 
@@ -647,17 +721,21 @@ SENİN GÖREVİN:
 
         # Hisse grafiği / fiyat analizi fallback
         if should_force_market:
-            # Mesajdan potansiyel sembolleri ayıkla
+            # Mesajdan BIST listesine göre filtreli semboller ayıkla
             raw_tokens = re.findall(r"\b[A-Z0-9\.]{3,8}\b", last_user_msg.upper())
 
-            # Hisse ile ilgisiz sık kullanılan kelimeleri ele
-            BLACKLIST_TOKENS = {
-                "TRADE", "YAP", "AL", "SAT", "GRAFIK", "GRAFİK",
-                "GUNLUK", "GÜNLÜK", "BACKTEST", "TEST", "ICIN", "İÇİN",
-                "STRATEJI", "STRATEJİ"
-            }
+            if BIST_TICKERS:
+                # BIST listesi yüklüyse, yalnızca listede olan tokenları al
+                symbols_found = [t for t in raw_tokens if t in BIST_TICKERS]
+            else:
+                # Fallback: kara liste filtresi
+                BLACKLIST_TOKENS = {
+                    "TRADE", "YAP", "AL", "SAT", "GRAFIK", "GRAFİK",
+                    "GUNLUK", "GÜNLÜK", "BACKTEST", "TEST", "ICIN", "İÇİN",
+                    "STRATEJI", "STRATEJİ", "SON", "AY", "YIL", "BIST",
+                }
+                symbols_found = [t for t in raw_tokens if t not in BLACKLIST_TOKENS]
 
-            symbols_found = [t for t in raw_tokens if t not in BLACKLIST_TOKENS]
             symbols_unique = list(dict.fromkeys(symbols_found))
 
             # Bu mesajda sembol yoksa, önceki sembolleri kullan
@@ -682,7 +760,11 @@ SENİN GÖREVİN:
 
             # Buraya geldiysek elimizde en az bir sembol var
             symbols_str = ",".join(symbols_unique)
-            result = get_market_data(symbols_str)
+            with st.spinner(f"Piyasa verisi çekiliyor: {symbols_str}..."):
+                result = get_market_data(symbols_str)
+            if isinstance(result, dict) and "hata" not in result:
+                # cache'li fonksiyon session_state yazamaz; burada güncelliyoruz
+                _update_stock_session_state(symbols_str, result)
 
             if isinstance(result, dict):
                 if "hata" in result:
@@ -732,6 +814,22 @@ SENİN GÖREVİN:
     tool_name = tool_command.split("(", 1)[0]
     tool_output = f"Bilinmeyen araç: {tool_name}"
 
+    # Mevzuat Asistanı: piyasa/teknik/risk araçları bu modda çalışmaz
+    MARKET_TOOLS = {"get_market_data", "analyze_technical", "analyze_risk", "analyze_portfolio"}
+    if persona == "Mevzuat Asistanı" and tool_name in MARKET_TOOLS:
+        messages_for_redirect = [{"role": "system", "content": system_prompt}] + chat_history[:-1]
+        messages_for_redirect.append({
+            "role": "user",
+            "content": (
+                f"Kullanıcı '{last_user_msg}' diye sordu. "
+                "Bu soru piyasa fiyatı veya teknik analiz içeriyor. "
+                "Mevzuat Asistanı olarak bu konuda analiz yapamayacağını, "
+                "sol panelden Analist Modu'na geçmelerini öneren kısa ve nazik bir yanıt ver. "
+                "Hisse fiyatı, destek/direnç veya teknik gösterge üretme."
+            ),
+        })
+        return call_claude(messages_for_redirect)
+
     if tool_name in TOOLS:
         try:
             params_str = tool_command[len(tool_name) + 1: -1]
@@ -762,7 +860,47 @@ SENİN GÖREVİN:
                 else:
                     typed_params[k] = v
 
-            result = TOOLS[tool_name]["function"](**typed_params)
+            SPINNER_MESSAGES = {
+                "get_market_data":           "Piyasa verisi çekiliyor...",
+                "analyze_technical":         "Teknik analiz hesaplanıyor...",
+                "analyze_risk":              "Risk metrikleri hesaplanıyor...",
+                "analyze_fundamental":       "Temel veriler çekiliyor...",
+                "analyze_portfolio":         "Portföy analizi yapılıyor...",
+                "web_search":                "Web araması yapılıyor...",
+                "search_financial_documents":"Belgeler taranıyor...",
+                "calculate_loan_payment":    "Kredi hesaplanıyor...",
+                "get_current_loan_rates":    "Kredi oranları kontrol ediliyor...",
+            }
+            spinner_msg = SPINNER_MESSAGES.get(tool_name, "İşleniyor...")
+            with st.spinner(spinner_msg):
+                result = TOOLS[tool_name]["function"](**typed_params)
+
+            # Analist Modu: analyze_technical çağrıldığında risk + temel veriyi de otomatik zincirle
+            if persona == "Analist Modu" and tool_name == "analyze_technical":
+                symbol_arg = typed_params.get("symbol", "")
+                if symbol_arg:
+                    extra_parts = []
+                    with st.spinner("Risk metrikleri hesaplanıyor..."):
+                        risk_res = risk_snapshot(symbol_arg)
+                    if "hata" not in risk_res:
+                        extra_parts.append(
+                            "--- RİSK METRİKLERİ ---\n"
+                            + json.dumps(risk_res, indent=2, ensure_ascii=False)
+                        )
+                    with st.spinner("Temel veriler çekiliyor..."):
+                        fund_res = fundamental_snapshot(symbol_arg)
+                    if "hata" not in fund_res:
+                        extra_parts.append(
+                            "--- TEMEL ANALİZ VERİLERİ ---\n"
+                            + json.dumps(fund_res, indent=2, ensure_ascii=False)
+                        )
+                    if extra_parts:
+                        result["_ek_analizler"] = extra_parts
+
+            # get_market_data cache'li; session_state burada güncelle
+            if tool_name == "get_market_data" and isinstance(result, dict) and "hata" not in result:
+                symbols_arg = typed_params.get("symbols", "")
+                _update_stock_session_state(symbols_arg, result)
 
             if tool_name == "search_financial_documents":
                 tool_output = "\n\n".join(f"Dahili Belge İçeriği:\n{d['text']}" for d in result)
@@ -785,7 +923,18 @@ SENİN GÖREVİN:
             if not tool_output:
                 tool_output = "İlgili sonuç bulunamadı."
         except Exception as e:
-            tool_output = f"Araç çalıştırılırken bir hata oluştu: {e}"
+            # Stack trace kullanıcıya gösterilmez; kategorik Türkçe mesaj üretilir
+            err_str = str(e).lower()
+            if "timeout" in err_str or "timed out" in err_str:
+                tool_output = "Hata: Veri kaynağına bağlanırken zaman aşımı oluştu. Lütfen tekrar deneyin."
+            elif "api" in err_str or "key" in err_str or "401" in err_str or "403" in err_str:
+                tool_output = "Hata: API anahtarı geçersiz veya erişim reddedildi. Lütfen yapılandırmayı kontrol edin."
+            elif "connection" in err_str or "network" in err_str:
+                tool_output = "Hata: Ağ bağlantısı kurulamadı. İnternet bağlantınızı kontrol edin."
+            elif "sembol" in err_str or "symbol" in err_str or "ticker" in err_str:
+                tool_output = "Hata: Sembol bulunamadı veya geçersiz. Sembolü kontrol edip tekrar deneyin."
+            else:
+                tool_output = "Hata: İşlem sırasında beklenmeyen bir sorun oluştu. Lütfen tekrar deneyin."
 
     # web_search için özel final prompt (Kaynaklar + Öneriler)
     if tool_name == "web_search":
@@ -799,29 +948,49 @@ Bu JSON, şu alanları içeriyor:
 
 SENİN GÖREVİN:
 1. "results" içindeki "title" ve "snippet" alanlarını kullanarak kullanıcının sorusuna net, özet ve güncel bir cevap yaz.
-2. Cevabının EN ALTINDA mutlaka ayrı bir blok olarak şu formatta kaynakları listele:
+2. Her bilgi maddesinin sonuna parantez içinde **(Web araması)** etiketini ekle.
+3. Cevabının EN ALTINDA mutlaka ayrı bir blok olarak şu formatta kaynakları listele:
    Kaynaklar:
    - <link1>
    - <link2>
    - ...
-3. Linkleri sadece "results" içindeki "link" alanlarından al. Yeni kaynak uydurma.
-4. Genel anlatım kısmında uzun URL yazma; linkleri sadece "Kaynaklar:" bölümünde ver.
-5. Cevabının sonunda, her zamanki gibi, kullanıcının merak edebileceği EN AZ 3 devam sorusunu "Şunları da merak edebilirsiniz:" başlığıyla madde madde yaz.
+4. Linkleri sadece "results" içindeki "link" alanlarından al. Yeni kaynak uydurma.
+5. Genel anlatım kısmında uzun URL yazma; linkleri sadece "Kaynaklar:" bölümünde ver.
+6. Cevabının sonunda, her zamanki gibi, kullanıcının merak edebileceği EN AZ 3 devam sorusunu "Şunları da merak edebilirsiniz:" başlığıyla madde madde yaz.
 """
-    else:
-        final_prompt_text = f"""Kullanıcının '{last_user_msg}' sorusuna cevap vermek için bir araç çalıştırıldı ve şu sonuç bulundu:
---- ARAÇ SONUCU ---
+    elif tool_name == "search_financial_documents":
+        final_prompt_text = f"""Kullanıcının '{last_user_msg}' sorusuna cevap vermek için dahili mevzuat belgeleri tarandı:
+--- ARAÇ SONUCU (Dahili Belgeler) ---
 {tool_output}
 ---
 SENİN GÖREVİN:
-1. Bu sonucu analiz et ve kullanıcıya net bir cevap oluştur.
-2. Eğer JSON içinde 'guncel_fiyat', 'gunluk_en_dusuk' ve 'gunluk_en_yuksek' alanları varsa, kısa vadeli destek ve direnç seviyelerini bu sayılara DAYANDIR. Bu aralığın biraz içini veya çevresini kullanabilirsin ama kesinlikle bambaşka fiyat seviyeleri uydurma.
-3. Özellikle '1 günlük grafikte' veya 'gün içi' ifadesi geçiyorsa, yorumlarında önceliği bu günlük aralık ve volatilite bilgisine ver.
-4. Cevabını, sana atanan kimliğin (persona) gerektirdiği formata uygun şekilde, sonunda EN AZ 3 adet devam sorusu önererek tamamla.
-5. Araç çıktısında bazı semboller için veri yoksa, yine de veri olan semboller üzerinden analiz yap ve eksik sembolleri ayrıca belirt.
-6. Bu uygulamada sadece kapanış fiyatları ve bunlardan türetilen yüzdesel değişimler ve basit karşılaştırmalar kullanılabilir.
-7. RSI, hacim, 50/200 günlük ortalama vb. teknik göstergeler için SAYISAL değeri veya yüzdesel değişimi UYDURMA; bu göstergeler sorulursa yalnızca fiyat hareketi ve yüzdesel değişim üzerinden yorum yapabileceğini açıkla.
-8. Kendi eğitimindeki eski fiyatları ve 2023 civarı dahili bilgileri fiyat olarak KULLANMA; sadece araçtan gelen verilerle konuş.
+1. Yukarıdaki belge içeriklerini kullanarak kullanıcının sorusuna net ve doğru bir yanıt ver.
+2. Her bilgi maddesinin sonuna parantez içinde **(Dahili Belge)** etiketini ekle.
+3. Belgede kural/madde numarası veya tebliğ adı geçiyorsa mutlaka belirt.
+4. Belgede açıkça yanıt yoksa, "Dahili belgelerimde bu konuya dair doğrudan bir hüküm bulunamadı" de ve genel mevzuat çerçevesini kısaca anlat; tarih veya madde uydurma.
+5. Cevabının sonunda EN AZ 3 devam sorusu öner.
+"""
+    else:
+        # Analist Modu zincirleme verilerini tool_output'a ekle
+        ek_analizler = ""
+        if isinstance(result, dict) and "_ek_analizler" in result:
+            ek_analizler = "\n\n" + "\n\n".join(result["_ek_analizler"])
+            # JSON çıktısından _ek_analizler alanını temizle
+            clean_result = {k: v for k, v in result.items() if k != "_ek_analizler"}
+            tool_output = json.dumps(clean_result, indent=2, ensure_ascii=False)
+
+        final_prompt_text = f"""Kullanıcının '{last_user_msg}' sorusuna cevap vermek için araçlar çalıştırıldı:
+--- TEKNİK ANALİZ SONUCU ---
+{tool_output}
+{ek_analizler}
+---
+SENİN GÖREVİN:
+1. Araç çıktısındaki TÜM sayısal verileri (RSI, MACD, Bollinger, MA/EMA, ATR, Supertrend, destek/direnç, F/K, ROE vb.) kullanarak kapsamlı bir analiz yaz. Göstergeler artık gerçek verilerle geliyor — UYDURMA YOK.
+2. Temel analiz verileri (_ek_analizler içinde) varsa, bunları "Temel Bağlam" bölümünde yorumla.
+3. Risk metrikleri varsa, "Riskler" bölümünde kullan.
+4. Destek/direnç seviyeleri araçtan geliyorsa (destek_direnc alanı), doğrudan bu sayıları kullan.
+5. Cevabını persona formatına uygun yaz, sonunda EN AZ 3 devam sorusu öner.
+6. Kendi eğitimindeki fiyat, F/K veya temettü verilerini KULLANMA — sadece araç çıktısını esas al.
 """
 
     history_without_last_prompt = chat_history[:-1]
@@ -847,6 +1016,10 @@ def display_market_chart(history_df, company_name, key=None):
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
     st.plotly_chart(fig, use_container_width=True, key=key)
+    st.caption(
+        "Her hisse başlangıç günü = 100 olarak normalize edilmiştir. "
+        "Grafik fiyat düzeylerini değil, göreli performansı karşılaştırır."
+    )
 
 
 # --- Dosya Analizi Yardımcı Fonksiyonları ---
@@ -955,6 +1128,9 @@ Yanıtın özet ama görece detaylı olsun; birkaç paragraf + madde listeleri y
 # --- Streamlit Uygulaması ---
 
 def run_streamlit_app() -> None:
+    global BIST_TICKERS
+    BIST_TICKERS = load_bist_tickers()
+
     st.title(f"📈 {APP_NAME}")
 
     if "chats" not in st.session_state:
@@ -963,15 +1139,18 @@ def run_streamlit_app() -> None:
         st.session_state.active_chat_id = None
     if "active_persona" not in st.session_state:
         st.session_state.active_persona = "Genel Asistan"
-    if "work_mode" not in st.session_state:
-        st.session_state.work_mode = "Sohbet"
+    if "_prev_persona" not in st.session_state:
+        st.session_state._prev_persona = st.session_state.active_persona
 
     # --- Karşılama Mesajı ---
     WELCOME_MESSAGE = (
-        f"Merhaba! Ben {APP_NAME}. Bankacılık mevzuatı (BDDK), finansal piyasalar ve "
-        "ekonomik gelişmeler konusunda size destek olmak için buradayım.\n\n"
-        "İster karmaşık yasal düzenlemeleri sorun, ister piyasa analizi isteyin; "
-        "güvenilir verilerle yanınızdayım."
+        f"Merhaba! Ben **{APP_NAME}**.\n\n"
+        "Türkiye finans piyasaları, BDDK/SPK mevzuatı ve ekonomik gelişmeler konularında yanınızdayım.\n\n"
+        "**Üç modda çalışıyorum:**\n"
+        "- 🧭 **Genel Asistan** — Piyasa, ekonomi ve finans sorularına genel yanıtlar\n"
+        "- 📊 **Analist Modu** — Teknik ve temel analiz bir arada\n"
+        "- ⚖️ **Mevzuat Asistanı** — BDDK, SPK, TCMB tebliğ ve yönetmelikleri\n\n"
+        "Sol panelden modu seçip sormaya başlayabilirsiniz."
     )
 
     if not st.session_state.chats:
@@ -982,23 +1161,30 @@ def run_streamlit_app() -> None:
     # --- Sidebar ---
     with st.sidebar:
         st.title(f"💡 {APP_NAME}")
-        st.session_state.work_mode = st.selectbox(
-            "Çalışma Modu:",
-            options=["Sohbet", "Dosya Analizi", "Portföy Takibi"],
-            index=["Sohbet", "Dosya Analizi", "Portföy Takibi"].index(st.session_state.work_mode),
-        )
 
-        if st.session_state.work_mode == "Sohbet":
-            st.session_state.active_persona = st.selectbox(
-                "Asistan Modu Seçin:",
-                options=list(PERSONA_PROMPTS.keys()),
-                index=list(PERSONA_PROMPTS.keys()).index(st.session_state.active_persona),
-            )
-        else:
-            st.markdown(
-                "> Dosya Analizi ve Portföy Takibi modlarında persona seçimi otomatik/ikincil öneme sahiptir. "
-                "Sohbet modunda personayı doğrudan yönetebilirsiniz."
-            )
+        persona_labels = {
+            "Genel Asistan": "🧭 Genel Asistan",
+            "Analist Modu": "📊 Analist Modu",
+            "Mevzuat Asistanı": "⚖️ Mevzuat Asistanı",
+        }
+        persona_descriptions = {
+            "Genel Asistan": "Piyasa, ekonomi ve finans sorularına genel yanıtlar.",
+            "Analist Modu": "Teknik + temel analiz bir arada: MA, Supertrend, sektör ve makro bağlam.",
+            "Mevzuat Asistanı": "BDDK, SPK, TCMB mevzuatı — tebliğ ve yönetmelik odaklı yanıtlar.",
+        }
+
+        selected_persona = st.radio(
+            "Asistan Modu",
+            options=list(persona_labels.keys()),
+            format_func=lambda k: persona_labels[k],
+            index=list(persona_labels.keys()).index(st.session_state.active_persona),
+        )
+        st.caption(persona_descriptions[selected_persona])
+
+        if selected_persona != st.session_state._prev_persona:
+            st.toast(f"Mod değiştirildi: {persona_labels[selected_persona]}", icon="🔄")
+            st.session_state._prev_persona = selected_persona
+        st.session_state.active_persona = selected_persona
 
         st.markdown("---")
         if st.button("➕ Yeni Sohbet"):
@@ -1006,6 +1192,74 @@ def run_streamlit_app() -> None:
             st.session_state.chats[new_chat_id] = [{"role": "assistant", "content": WELCOME_MESSAGE}]
             st.session_state.active_chat_id = new_chat_id
             st.rerun()
+
+        # --- GÜNCEL MEVZUAT TOPLAYICI ---
+        st.markdown("---")
+        st.markdown("#### 🌐 Güncel Veri Taraması")
+
+        all_sources = list(SOURCE_MAP.keys())
+        regulatory = ["Resmi Gazete", "BDDK", "SPK", "TCMB", "Hazine", "KAP"]
+        news_sources = ["Bloomberg HT", "Ekonomim", "Para Analiz", "Dünya Gazetesi"]
+
+        with st.expander("Kaynak seçimi", expanded=False):
+            sel_reg = st.multiselect(
+                "Düzenleyici Kurumlar",
+                options=regulatory,
+                default=regulatory,
+                key="scraper_regulatory",
+            )
+            sel_news = st.multiselect(
+                "Finans Medyası",
+                options=news_sources,
+                default=["Bloomberg HT", "Ekonomim"],
+                key="scraper_news",
+            )
+
+        selected_sources = sel_reg + sel_news
+
+        if st.button("🔄 Şimdi Tara", use_container_width=True, type="primary"):
+            if not selected_sources:
+                st.warning("En az bir kaynak seçin.")
+            else:
+                progress_placeholder = st.empty()
+                progress_bar = st.progress(0)
+                log_lines = []
+                total = len(selected_sources)
+
+                def _progress_cb(label: str, count: int):
+                    log_lines.append(f"✓ {label}: {count} belge")
+                    done = len(log_lines)
+                    progress_bar.progress(done / total)
+                    progress_placeholder.markdown("\n".join(log_lines))
+
+                with st.spinner("Kaynaklar taranıyor..."):
+                    summary = run_scraper(
+                        sources=selected_sources,
+                        progress_callback=_progress_cb,
+                    )
+
+                progress_bar.empty()
+                progress_placeholder.empty()
+
+                toplam = summary["toplam"]
+                if toplam == 0:
+                    st.info("Yeni belge bulunamadı (zaten güncel veya siteler erişilemez).")
+                else:
+                    st.success(f"✅ {toplam} yeni belge kaydedildi.")
+                    with st.expander("Kaynak bazlı özet"):
+                        for src, cnt in summary["kaynaklar"].items():
+                            if cnt > 0:
+                                st.markdown(f"- **{src}**: {cnt}")
+                    st.caption(
+                        f"Belgeler `resmi_gazete_guncel/` klasörüne kaydedildi. "
+                        f"RAG indeksini güncellemek için `python create_index.py` çalıştırın."
+                    )
+
+        # Son tarama tarihi
+        saved_files = sorted(os.listdir("resmi_gazete_guncel")) if os.path.exists("resmi_gazete_guncel") else []
+        if saved_files:
+            last_date = saved_files[-1][:10]
+            st.caption(f"Son kayıt: {last_date} · {len(saved_files)} belge")
 
         st.markdown("### Sohbet Geçmişi")
         for chat_id in reversed(list(st.session_state.chats.keys())):
@@ -1016,8 +1270,8 @@ def run_streamlit_app() -> None:
                 st.session_state.active_chat_id = chat_id
                 st.rerun()
 
-    # --- DOSYA ANALİZİ MODU ---
-    if st.session_state.work_mode == "Dosya Analizi":
+    # --- DOSYA ANALİZİ ve PORTFÖY MODU kaldırıldı (MVP) ---
+    if False and st.session_state.get("work_mode") == "Dosya Analizi":
         st.header("📂 Dosya Analizi Modu (LLM + Sade Dashboard)")
 
         uploaded_file = st.file_uploader(
@@ -1059,6 +1313,16 @@ def run_streamlit_app() -> None:
                         st.error(f"Dosya okunurken bir hata oluştu: {e}")
                 elif ext == "pdf":
                     # PDF dosyası
+                    try:
+                        _tmp_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
+                        total_pages = len(_tmp_reader.pages)
+                    except Exception:
+                        total_pages = 0
+                    if total_pages > 15:
+                        st.info(
+                            f"PDF {total_pages} sayfa içeriyor. "
+                            f"Analiz için yalnızca ilk 15 sayfa kullanıldı."
+                        )
                     text = read_pdf_text(file_bytes)
                     st.session_state.uploaded_pdf_text = text
                     st.session_state.uploaded_summary = summarize_pdf_with_llm(text)
@@ -1306,8 +1570,7 @@ def run_streamlit_app() -> None:
 
         return  # Dosya Analizi modunda sohbet kısmına inmiyoruz.
 
-    # --- PORTFÖY TAKİBİ MODU ---
-    if st.session_state.work_mode == "Portföy Takibi":
+    if False and st.session_state.get("work_mode") == "Portföy Takibi":
         st.header("📊 Portföy Takibi ve Risk Analizi")
 
         st.markdown(
@@ -1369,8 +1632,6 @@ def run_streamlit_app() -> None:
         return  # Portföy modunda sohbet kısmına inmiyoruz.
 
     # --- SOHBET MODU ---
-
-    st.header(f"Sohbet Modu: {st.session_state.active_persona}")
     active_chat_history = st.session_state.chats[st.session_state.active_chat_id]
 
     prompt = None
@@ -1394,10 +1655,10 @@ def run_streamlit_app() -> None:
         st.markdown("**Hızlı Başlangıç Önerileri:**")
 
         initial_questions = [
-            "Ticari kredilerde döviz varlığı sınırı nedir?",
-            "GARAN ve THYAO hisselerini karşılaştır",
-            "BDDK'nın son yayınladığı düzenlemeler neler?",
-            "Enflasyon muhasebesi kimleri kapsıyor?"
+            "GARAN ve AKBNK son 6 ay performansını karşılaştır",
+            "BDDK'nın son kredi düzenlemeleri neler?",
+            "THYAO teknik analizi",
+            "SPK'nın halka arz mevzuatında temel şartlar neler?",
         ]
 
         col1, col2 = st.columns(2)
