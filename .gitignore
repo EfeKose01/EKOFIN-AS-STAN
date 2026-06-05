@@ -1,10 +1,7 @@
-# Gizli API anahtarları ve ayarlar
 .env
-
-# Python sanal ortam klasörü (eğer kullanıyorsan)
+.venv/
 venv/
 __pycache__/
-
-# Diğer genel dosyalar (isteğe bağlı)
 *.pyc
 .DS_Store
+resmi_gazete_guncel/
