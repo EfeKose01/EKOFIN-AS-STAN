@@ -95,6 +95,13 @@ def fundamental_snapshot(symbol: str) -> Dict[str, Any]:
         else:
             result[tr_key] = val
 
+    # Temettü verimi anormal değer kontrolü (yfinance TL/USD kur hatası)
+    if "temettü_verimi_yuzde" in result:
+        tv = result["temettü_verimi_yuzde"]
+        if tv is not None and tv > 50:
+            result["temettü_verimi_yuzde"] = None  # Güvenilmez veri, gösterme
+            result["temettü_verimi_not"] = "Veri doğrulanamadı (kaynak hatası)"
+
     # Piyasa değerini milyar olarak formatla
     if "piyasa_degeri_tl" in result:
         mc = result["piyasa_degeri_tl"]
