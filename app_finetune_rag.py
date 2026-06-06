@@ -1721,6 +1721,11 @@ def run_streamlit_app() -> None:
                     prompt = suggestion
 
     user_input = st.chat_input("Sorunuzu yazın…")
+    st.caption(
+        "⚠️ EkoFin Asistan tarafından sunulan içerikler yalnızca bilgilendirme amaçlıdır ve yatırım tavsiyesi niteliği taşımaz. "
+        "Burada yer alan hiçbir bilgi, Sermaye Piyasası Kurulu (SPK) veya herhangi bir yetkili kurum tarafından yetkilendirilmiş "
+        "yatırım danışmanlığı hizmeti olarak değerlendirilemez. Yatırım kararlarınızı vermeden önce lisanslı bir yatırım danışmanına başvurmanız tavsiye edilir."
+    )
     if user_input:
         prompt = user_input
 
