@@ -1021,12 +1021,13 @@ SENİN GÖREVİN:
 {ek_analizler}
 ---
 SENİN GÖREVİN:
-1. Araç çıktısındaki TÜM sayısal verileri (RSI, MACD, Bollinger, MA/EMA, ATR, Supertrend, destek/direnç, F/K, ROE vb.) kullanarak kapsamlı bir analiz yaz. Göstergeler artık gerçek verilerle geliyor — UYDURMA YOK.
-2. Temel analiz verileri (_ek_analizler içinde) varsa, bunları "Temel Bağlam" bölümünde yorumla.
-3. Risk metrikleri varsa, "Riskler" bölümünde kullan.
-4. Destek/direnç seviyeleri araçtan geliyorsa (destek_direnc alanı), doğrudan bu sayıları kullan.
-5. Cevabını persona formatına uygun yaz, sonunda EN AZ 3 devam sorusu öner.
-6. Kendi eğitimindeki fiyat, F/K veya temettü verilerini KULLANMA — sadece araç çıktısını esas al.
+1. Araç çıktısındaki TÜM sayısal verileri kullanarak kapsamlı analiz yaz. UYDURMA YOK — sadece gelen veri.
+2. TEKNİK göstergeler ZORUNLU olarak cevaba yansımalı: RSI14 (sayı + yorum), MACD (yorum), Bollinger pozisyonu, MA20/50/200 kıyası, Supertrend yönü, ATR, destek/direnç seviyeleri.
+3. Birden fazla sembol varsa: Her hisse için ayrı teknik tablo yap, sonra karşılaştırmalı özet ekle.
+4. Temel veriler (_ek_analizler) varsa: F/K, P/DD, ROE, net kâr marjı, piyasa değeri — hepsini "Temel Bağlam" bölümüne yaz.
+5. Risk metrikleri varsa: Yıllık volatilite %, max drawdown %, Sharpe oranı — "Risk" bölümüne yaz.
+6. Destek/direnç sayılarını (destek_guclu, S1, pivot, R1, direnc_guclu) doğrudan yaz, yuvarlama.
+7. Cevabını persona formatına uygun yaz, sonunda EN AZ 3 devam sorusu öner.
 """
 
     history_without_last_prompt = chat_history[:-1]
