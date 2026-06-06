@@ -152,7 +152,7 @@ _load_streamlit_secrets()
 
 FAISS_INDEX_PATH = "rag_index.faiss"
 CONTENT_MAP_PATH = "rag_content.pkl"
-EMBEDDING_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
+EMBEDDING_MODEL = "paraphrase-multilingual-mpnet-base-v2"
 
 
 @st.cache_resource
