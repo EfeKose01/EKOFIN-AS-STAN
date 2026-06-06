@@ -157,18 +157,27 @@ EMBEDDING_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
 
 @st.cache_resource
 def load_semantic_search_engine():
-    model = SentenceTransformer(EMBEDDING_MODEL)
-    index = faiss.read_index(FAISS_INDEX_PATH)
-    with open(CONTENT_MAP_PATH, "rb") as f:
-        content_map = pickle.load(f)
-    return model, index, content_map
+    try:
+        model = SentenceTransformer(EMBEDDING_MODEL)
+        index = faiss.read_index(FAISS_INDEX_PATH)
+        with open(CONTENT_MAP_PATH, "rb") as f:
+            content_map = pickle.load(f)
+        return model, index, content_map
+    except Exception as e:
+        print(f"RAG yüklenemedi (devre dışı): {e}")
+        return None, None, None
 
+
+RAG_ENABLED = False
+SEARCH_MODEL, RAG_INDEX, RAG_CONTENT_MAP = None, None, None
 
 if os.path.exists(FAISS_INDEX_PATH) and os.path.exists(CONTENT_MAP_PATH):
-    SEARCH_MODEL, RAG_INDEX, RAG_CONTENT_MAP = load_semantic_search_engine()
-else:
-    st.error("RAG indeks dosyaları bulunamadı. Lütfen önce `python create_index.py` komutunu çalıştırın.")
-    st.stop()
+    try:
+        SEARCH_MODEL, RAG_INDEX, RAG_CONTENT_MAP = load_semantic_search_engine()
+        if SEARCH_MODEL is not None:
+            RAG_ENABLED = True
+    except Exception as e:
+        print(f"RAG başlatılamadı: {e}")
 
 
 # --- Yardımcı Fonksiyonlar ---
@@ -200,9 +209,14 @@ def loan_payment(principal: float, annual_rate: float, years: float, payments_pe
 
 
 def search_documents(query: str, k: int = 4) -> List[Dict[str, Any]]:
-    query_vector = SEARCH_MODEL.encode([query])
-    distances, indices = RAG_INDEX.search(np.array(query_vector).astype("float32"), k)
-    return [RAG_CONTENT_MAP[i] for i in indices[0]]
+    if not RAG_ENABLED or SEARCH_MODEL is None or RAG_INDEX is None:
+        return []
+    try:
+        query_vector = SEARCH_MODEL.encode([query])
+        distances, indices = RAG_INDEX.search(np.array(query_vector).astype("float32"), k)
+        return [RAG_CONTENT_MAP[i] for i in indices[0]]
+    except Exception:
+        return []
 
 
 def _fetch_single_symbol_close_series(yf_symbol: str):
