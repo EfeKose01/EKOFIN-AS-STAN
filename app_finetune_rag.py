@@ -916,6 +916,28 @@ SENİN GÖREVİN:
                 symbols_arg = typed_params.get("symbols", "")
                 _update_stock_session_state(symbols_arg, result)
 
+                # Analist Modu: multi-sembol sorgularında her sembol için teknik+risk+temel zincirle
+                if persona == "Analist Modu" and symbols_arg:
+                    semboller = [s.strip().upper() for s in symbols_arg.replace(",", " ").split() if s.strip()]
+                    if len(semboller) >= 1:
+                        extra_parts = []
+                        for sym in semboller[:3]:  # max 3 sembol
+                            with st.spinner(f"{sym} teknik analiz..."):
+                                t_res = compute_technical_snapshot(sym)
+                            if "hata" not in t_res:
+                                extra_parts.append(f"--- {sym} TEKNİK ANALİZ ---\n" + json.dumps(t_res, indent=2, ensure_ascii=False))
+                            with st.spinner(f"{sym} risk analiz..."):
+                                r_res = risk_snapshot(sym)
+                            if "hata" not in r_res:
+                                extra_parts.append(f"--- {sym} RİSK ---\n" + json.dumps(r_res, indent=2, ensure_ascii=False))
+                            with st.spinner(f"{sym} temel analiz..."):
+                                f_res = fundamental_snapshot(sym)
+                            if "hata" not in f_res:
+                                extra_parts.append(f"--- {sym} TEMEL ---\n" + json.dumps(f_res, indent=2, ensure_ascii=False))
+                        if extra_parts:
+                            if isinstance(result, dict):
+                                result["_ek_analizler"] = extra_parts
+
             if tool_name == "search_financial_documents":
                 tool_output = "\n\n".join(f"Dahili Belge İçeriği:\n{d['text']}" for d in result)
             elif isinstance(result, list):
