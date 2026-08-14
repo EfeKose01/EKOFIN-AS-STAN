@@ -5,3 +5,5 @@ __pycache__/
 *.pyc
 .DS_Store
 resmi_gazete_guncel/
+.streamlit/secrets.toml
+*.db
