@@ -17,11 +17,26 @@ from backend.schemas import UserCreate
 _SESSION_KEY = "ekofin_manual_user_id"
 
 
+def _google_logged_in() -> bool:
+    """st.user.is_logged_in güvenli kontrolü.
+
+    secrets.toml'da [auth] bölümü (Google OAuth) yapılandırılmamışsa Streamlit
+    st.user nesnesini oluşturur ama HERHANGİ BİR özelliğe erişim (is_logged_in
+    dahil) AttributeError fırlatır — False DÖNMEZ. Bu yüzden düz `st.user.is_logged_in`
+    kontrolü, Google girişi hiç kurulmamış ortamlarda (ör. yerel geliştirme, secrets.toml
+    henüz doldurulmamışken) myPortfolio sayfasını tamamen çökertiyordu.
+    """
+    try:
+        return bool(st.user.is_logged_in)
+    except Exception:
+        return False
+
+
 def get_current_user(db: Session) -> User | None:
     """Google (st.login) veya manuel (session_state) girişten hangisi aktifse o kullanıcıyı döner."""
 
     # 1) Google OAuth (Streamlit'in yerleşik auth'u)
-    if getattr(st, "user", None) is not None and st.user.is_logged_in:
+    if _google_logged_in():
         google_sub = st.user.get("sub") or st.user.get("email")
         user = get_or_create_google_user(
             db,
@@ -45,7 +60,7 @@ def is_authenticated(db: Session) -> bool:
 
 def logout() -> None:
     st.session_state.pop(_SESSION_KEY, None)
-    if getattr(st, "user", None) is not None and st.user.is_logged_in:
+    if _google_logged_in():
         st.logout()
     else:
         st.rerun()
@@ -71,7 +86,14 @@ def render_login_register_widget(db: Session) -> None:
         st.markdown("#### 🔐 Google ile devam et")
         st.caption("Şifre yönetmenize gerek kalmadan, tek tıkla.")
         if st.button("Google ile Giriş Yap", type="primary", use_container_width=True):
-            st.login("google")
+            try:
+                st.login("google")
+            except Exception:
+                st.error(
+                    "Google ile giriş şu an yapılandırılmamış. `.streamlit/secrets.toml` içindeki "
+                    "`[auth]` ve `[auth.google]` bölümlerini doldurmanız gerekiyor "
+                    "(bkz. `.streamlit/secrets.toml.example`). Bu arada e-posta ile devam edebilirsiniz."
+                )
 
     with col_r:
         st.markdown("#### ✉️ E-posta ile devam et")
