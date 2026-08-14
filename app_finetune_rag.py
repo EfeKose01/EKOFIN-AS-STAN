@@ -99,6 +99,189 @@ for _k in list(PERSONA_PROMPTS.keys()):
 APP_NAME = "EkoFin Asistan"
 st.set_page_config(page_title=APP_NAME, page_icon="🤖", layout="wide")
 
+# --- GÖRSEL TASARIM SİSTEMİ (Apple tarzı arayüz katmanı) ---
+
+CUSTOM_CSS = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+:root {
+    --ekofin-bg: #f5f5f7;
+    --ekofin-surface: #ffffff;
+    --ekofin-text: #1d1d1f;
+    --ekofin-text-secondary: #6e6e73;
+    --ekofin-accent: #0071e3;
+    --ekofin-accent-soft: rgba(0, 113, 227, 0.10);
+    --ekofin-border: rgba(0, 0, 0, 0.07);
+    --ekofin-shadow: 0 8px 30px rgba(0, 0, 0, 0.06);
+    --ekofin-radius: 20px;
+}
+
+html, body, .stApp {
+    background: linear-gradient(180deg, #fbfbfd 0%, #f5f5f7 55%, #eef0f3 100%) !important;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+    color: var(--ekofin-text);
+}
+
+#MainMenu, footer, [data-testid="stStatusWidget"] { visibility: hidden; }
+header[data-testid="stHeader"] { background: transparent; }
+
+.block-container {
+    max-width: 920px;
+    padding-top: 1.6rem;
+    padding-bottom: 6rem;
+    margin: 0 auto;
+}
+
+h1, h2, h3, h4 { color: var(--ekofin-text) !important; letter-spacing: -0.02em; font-weight: 700; }
+p, li, label, .stMarkdown { color: var(--ekofin-text); }
+
+/* ---- Hero başlık ---- */
+.ekofin-hero { text-align: center; padding: 1.4rem 1rem 1.8rem; }
+.ekofin-hero .eyebrow {
+    display: inline-flex; align-items: center; gap: .4rem;
+    font-size: .76rem; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+    color: var(--ekofin-accent); background: var(--ekofin-accent-soft);
+    padding: .38rem .9rem; border-radius: 999px; margin-bottom: 1rem;
+}
+.ekofin-hero h1 {
+    font-size: clamp(2.1rem, 4vw, 3.1rem); font-weight: 800; margin: 0 0 .55rem; line-height: 1.08;
+    background: linear-gradient(180deg, #1d1d1f 0%, #48484c 100%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
+.ekofin-hero p { font-size: 1.06rem; color: var(--ekofin-text-secondary); max-width: 580px; margin: 0 auto; }
+
+/* ---- Sidebar (koyu cam panel) ---- */
+[data-testid="stSidebar"] {
+    background: linear-gradient(195deg, #1c1c1e 0%, #000000 100%);
+    border-right: none;
+}
+[data-testid="stSidebar"] * { color: #f5f5f7 !important; }
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] { color: rgba(245,245,247,0.55) !important; }
+[data-testid="stSidebar"] hr { border-color: rgba(255,255,255,0.12); margin: 1.1rem 0; }
+
+.ekofin-brand {
+    display: flex; align-items: center; gap: .65rem; padding: .2rem 0 1.3rem; font-size: 1.18rem; font-weight: 700;
+}
+.ekofin-brand .logo-badge {
+    width: 36px; height: 36px; border-radius: 11px; flex-shrink: 0;
+    background: linear-gradient(135deg, #0a84ff, #34c9ff);
+    display: flex; align-items: center; justify-content: center; font-size: 1.15rem;
+    box-shadow: 0 6px 16px rgba(10,132,255,0.35);
+}
+
+/* Segmented control görünümlü persona seçici */
+[data-testid="stSidebar"] div[role="radiogroup"] {
+    background: rgba(255,255,255,0.07);
+    border-radius: 14px; padding: 5px; gap: 2px;
+    border: 1px solid rgba(255,255,255,0.08);
+}
+[data-testid="stSidebar"] div[role="radiogroup"] label {
+    border-radius: 10px; padding: .5rem .65rem !important; transition: background .18s ease;
+}
+[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) {
+    background: rgba(255,255,255,0.96);
+}
+[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) p {
+    color: #000 !important; font-weight: 650;
+}
+[data-testid="stSidebar"] div[role="radiogroup"] label > div:first-child {
+    display: none;
+}
+
+/* ---- Butonlar (pill / dokunmatik his) ---- */
+.stButton > button, .stDownloadButton > button {
+    border-radius: 980px !important;
+    border: 1px solid var(--ekofin-border) !important;
+    background: var(--ekofin-surface) !important;
+    color: var(--ekofin-text) !important;
+    font-weight: 600 !important;
+    padding: .55rem 1.3rem !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,.04);
+    transition: transform .15s ease, box-shadow .15s ease;
+}
+.stButton > button:hover, .stDownloadButton > button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 12px 26px rgba(0,0,0,.10);
+}
+.stButton > button[kind="primary"] {
+    background: linear-gradient(180deg, #0a84ff, #0071e3) !important;
+    color: #fff !important; border: none !important;
+}
+[data-testid="stSidebar"] .stButton > button {
+    background: rgba(255,255,255,0.08) !important;
+    border: 1px solid rgba(255,255,255,0.14) !important;
+    color: #f5f5f7 !important;
+}
+[data-testid="stSidebar"] .stButton > button[kind="primary"] {
+    background: linear-gradient(180deg, #0a84ff, #0071e3) !important;
+    border: none !important; color: #fff !important;
+}
+
+/* ---- Sohbet balonları ---- */
+[data-testid="stChatMessage"] {
+    background: var(--ekofin-surface);
+    border: 1px solid var(--ekofin-border);
+    border-radius: var(--ekofin-radius);
+    padding: 1rem 1.25rem;
+    margin-bottom: .9rem;
+    box-shadow: var(--ekofin-shadow);
+    animation: ekofin-fade-in .35s ease;
+}
+[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) {
+    background: linear-gradient(180deg, #eaf4ff, #f3f9ff);
+    border-color: rgba(0,113,227,0.16);
+}
+@keyframes ekofin-fade-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* ---- Sohbet giriş kutusu ---- */
+[data-testid="stChatInput"] {
+    border-radius: 980px !important;
+    box-shadow: 0 12px 30px rgba(0,0,0,.08) !important;
+    border: 1px solid var(--ekofin-border) !important;
+    background: var(--ekofin-surface) !important;
+}
+
+/* ---- Grafik kartı ---- */
+[data-testid="stPlotlyChart"] {
+    background: var(--ekofin-surface);
+    border-radius: var(--ekofin-radius);
+    border: 1px solid var(--ekofin-border);
+    padding: 1rem;
+    box-shadow: var(--ekofin-shadow);
+}
+
+/* ---- Uyarılar / expander / metric kartları ---- */
+[data-testid="stAlert"] { border-radius: 16px; border: none; }
+[data-testid="stExpander"] {
+    border-radius: 16px; border: 1px solid var(--ekofin-border); background: var(--ekofin-surface);
+    overflow: hidden;
+}
+[data-testid="stSidebar"] [data-testid="stExpander"] {
+    background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.14);
+}
+[data-testid="stMetric"] {
+    background: var(--ekofin-surface); border-radius: 16px; padding: 1rem;
+    border: 1px solid var(--ekofin-border); box-shadow: var(--ekofin-shadow);
+}
+
+/* ---- Yasal uyarı şeridi ---- */
+.ekofin-disclaimer {
+    font-size: .78rem; color: var(--ekofin-text-secondary); line-height: 1.5;
+    background: rgba(0,0,0,0.035); border-radius: 14px;
+    padding: .75rem 1.1rem; margin-top: .4rem;
+}
+
+/* ---- İnce scrollbar ---- */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.16); border-radius: 999px; }
+::-webkit-scrollbar-track { background: transparent; }
+</style>
+"""
+
 
 @st.cache_resource
 def load_bist_tickers() -> set:
@@ -1046,12 +1229,24 @@ def display_market_chart(history_df, company_name, key=None):
         fig.add_trace(go.Scatter(x=history_df.index, y=normalized_series, mode="lines", name=column))
 
     fig.update_layout(
-        title=f"{company_name} - Normalize Edilmiş Performans Grafiği (Başlangıç=100)",
+        title=dict(
+            text=f"{company_name} · Normalize Edilmiş Performans (Başlangıç=100)",
+            font=dict(size=16, color="#1d1d1f"),
+        ),
         xaxis_title="Tarih",
         yaxis_title="Yüzdesel Performans Değişimi",
-        template="plotly_dark",
+        template="plotly_white",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        colorway=["#0071e3", "#34c759", "#ff9500", "#ff3b30", "#5e5ce6", "#af52de"],
+        font=dict(family="-apple-system, BlinkMacSystemFont, Inter, sans-serif", color="#1d1d1f"),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        margin=dict(l=10, r=10, t=60, b=10),
+        hovermode="x unified",
     )
+    fig.update_xaxes(showgrid=True, gridcolor="rgba(0,0,0,0.06)", zeroline=False)
+    fig.update_yaxes(showgrid=True, gridcolor="rgba(0,0,0,0.06)", zeroline=False)
+    fig.update_traces(line=dict(width=2.5))
     st.plotly_chart(fig, use_container_width=True, key=key)
     st.caption(
         "Her hisse başlangıç günü = 100 olarak normalize edilmiştir. "
@@ -1168,7 +1363,18 @@ def run_streamlit_app() -> None:
     global BIST_TICKERS
     BIST_TICKERS = load_bist_tickers()
 
-    st.title(f"📈 {APP_NAME}")
+    st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+    st.markdown(
+        f"""
+        <div class="ekofin-hero">
+            <div class="eyebrow">🤖 Yapay Zekâ Destekli Finans Asistanı</div>
+            <h1>{APP_NAME}</h1>
+            <p>Türkiye finans piyasaları, BDDK/SPK mevzuatı ve şirket analizleri için sade, hızlı ve zarif bir deneyim.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     if "chats" not in st.session_state:
         st.session_state.chats = {}
@@ -1197,7 +1403,15 @@ def run_streamlit_app() -> None:
 
     # --- Sidebar ---
     with st.sidebar:
-        st.title(f"💡 {APP_NAME}")
+        st.markdown(
+            f"""
+            <div class="ekofin-brand">
+                <span class="logo-badge">💡</span>
+                <span>{APP_NAME}</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
         persona_labels = {
             "Genel Asistan": "🧭 Genel Asistan",
@@ -1721,10 +1935,16 @@ def run_streamlit_app() -> None:
                     prompt = suggestion
 
     user_input = st.chat_input("Sorunuzu yazın…")
-    st.caption(
-        "⚠️ EkoFin Asistan tarafından sunulan içerikler yalnızca bilgilendirme amaçlıdır ve yatırım tavsiyesi niteliği taşımaz. "
-        "Burada yer alan hiçbir bilgi, Sermaye Piyasası Kurulu (SPK) veya herhangi bir yetkili kurum tarafından yetkilendirilmiş "
-        "yatırım danışmanlığı hizmeti olarak değerlendirilemez. Yatırım kararlarınızı vermeden önce lisanslı bir yatırım danışmanına başvurmanız tavsiye edilir."
+    st.markdown(
+        """
+        <div class="ekofin-disclaimer">
+        ⚠️ EkoFin Asistan tarafından sunulan içerikler yalnızca bilgilendirme amaçlıdır ve yatırım tavsiyesi niteliği taşımaz.
+        Burada yer alan hiçbir bilgi, Sermaye Piyasası Kurulu (SPK) veya herhangi bir yetkili kurum tarafından yetkilendirilmiş
+        yatırım danışmanlığı hizmeti olarak değerlendirilemez. Yatırım kararlarınızı vermeden önce lisanslı bir yatırım danışmanına
+        başvurmanız tavsiye edilir.
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
     if user_input:
         prompt = user_input
