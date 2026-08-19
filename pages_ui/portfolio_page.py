@@ -106,16 +106,39 @@ def _render_overview(df: pd.DataFrame) -> None:
             fig = px.pie(
                 names=list(alloc.keys()),
                 values=list(alloc.values()),
-                hole=0.55,
+                hole=0.62,
                 color_discrete_sequence=["#0071e3", "#5e5ce6", "#34c759", "#ff9500", "#ff3b30", "#af52de", "#34c9ff"],
             )
-            fig.update_traces(textinfo="percent+label", textfont_size=12)
+            # Sektör adlarını dilimin İÇİNE yazmıyoruz: dar sütunda uzun adlar
+            # (ör. "Telekomünikasyon") dilim sınırını aşıp kırpılıyordu. Ad artık
+            # alttaki yatay açıklamada, dilimde yalnızca yüzde var.
+            fig.update_traces(
+                textinfo="percent",
+                textposition="inside",
+                insidetextorientation="horizontal",
+                textfont=dict(size=13, color="#ffffff"),
+                marker=dict(line=dict(color="rgba(255,255,255,0.85)", width=2)),
+                hovertemplate="<b>%{label}</b><br>%{value:.1f}%<extra></extra>",
+                sort=True,
+            )
             fig.update_layout(
-                showlegend=False, margin=dict(l=0, r=0, t=10, b=0),
+                height=330,
+                showlegend=True,
+                legend=dict(
+                    orientation="h", yanchor="top", y=-0.02,
+                    xanchor="center", x=0.5, font=dict(size=12),
+                ),
+                # Kırpılmayı önlemek için her yönde nefes payı bırakıyoruz.
+                margin=dict(l=20, r=20, t=20, b=20),
                 paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                 font=dict(family="-apple-system, BlinkMacSystemFont, Inter, sans-serif", color="#1d1d1f"),
+                # Donut ortasında portföyün toplam büyüklüğü.
+                annotations=[dict(
+                    text=f"<b>{summary['holdings_count']}</b><br><span style='font-size:11px'>varlık</span>",
+                    x=0.5, y=0.5, font=dict(size=20, color="#1d1d1f"), showarrow=False,
+                )],
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
     st.markdown("---")
     _render_personalized_news(df["symbol"].tolist())
