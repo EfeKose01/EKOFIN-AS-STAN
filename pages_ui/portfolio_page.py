@@ -175,6 +175,9 @@ def _render_manage(db, user_id: str, items) -> None:
             try:
                 data = PortfolioItemCreate(symbol=symbol, quantity=quantity, cost_basis=cost_basis, source="manual")
                 upsert_portfolio_item(db, user_id, data)
+                # st.rerun() BaseException fırlattığı için get_db()'nin çıkıştaki
+                # commit'ine ulaşılmaz; değişikliği burada kalıcı yapmalıyız.
+                db.commit()
                 st.success(f"{data.symbol} portföyünüze eklendi.")
                 st.rerun()
             except Exception as e:
@@ -196,6 +199,7 @@ def _render_manage(db, user_id: str, items) -> None:
         row[2].markdown(f"{float(it.cost_basis):,.2f} TL maliyet")
         if row[3].button("🗑️", key=f"del_{it.id}", help="Bu satırı sil"):
             delete_portfolio_item(db, user_id, it.id)
+            db.commit()  # st.rerun() öncesi kalıcı yap (bkz. backend/database.py notu)
             st.rerun()
 
 
@@ -272,6 +276,7 @@ def _render_ocr_upload(db, user_id: str) -> None:
                 except Exception:
                     continue
             if added:
+                db.commit()  # st.rerun() öncesi kalıcı yap (bkz. backend/database.py notu)
                 st.success(f"{added} satır portföyünüze eklendi.")
                 st.session_state.pop(_OCR_REVIEW_KEY, None)
                 st.session_state.pop("ekofin_ocr_last_file", None)

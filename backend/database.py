@@ -35,12 +35,21 @@ def init_db() -> None:
 
 @contextmanager
 def get_db() -> Iterator[Session]:
-    """`with get_db() as db:` şeklinde kullanılacak session context manager'ı."""
+    """`with get_db() as db:` şeklinde kullanılacak session context manager'ı.
+
+    DİKKAT — bloğun içinden akış kontrolü exception'ı fırlatan bir şey çağırırsanız
+    (Streamlit'te `st.rerun()` / `st.stop()`, ya da KeyboardInterrupt) aşağıdaki
+    `db.commit()` satırına HİÇ ULAŞILMAZ ve `db.close()` commit edilmemiş her şeyi
+    geri alır. Bu exception'lar `Exception` değil `BaseException` alt sınıfı olduğu
+    için eskiden sessizce yutuluyordu; artık `BaseException` yakalayıp açıkça
+    rollback ediyoruz. Yani: st.rerun()'dan ÖNCE mutlaka `db.commit()` çağırın
+    (bkz. pages_ui/auth.py ve pages_ui/portfolio_page.py).
+    """
     db = SessionLocal()
     try:
         yield db
         db.commit()
-    except Exception:
+    except BaseException:
         db.rollback()
         raise
     finally:

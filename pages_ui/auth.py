@@ -44,6 +44,9 @@ def get_current_user(db: Session) -> User | None:
             full_name=st.user.get("name"),
             google_sub=google_sub,
         )
+        # İlk Google girişinde kullanıcı burada yaratılıyor; sayfanın ilerleyen
+        # kısmındaki bir st.rerun() kaydı geri almasın diye hemen kalıcı yapıyoruz.
+        db.commit()
         return user
 
     # 2) Manuel e-posta/şifre girişi
@@ -122,6 +125,9 @@ def render_login_register_widget(db: Session) -> None:
                 try:
                     data = UserCreate(email=email, password=password, full_name=full_name or None)
                     user = create_user(db, data)
+                    # st.rerun() BaseException fırlattığı için get_db()'nin çıkıştaki
+                    # commit'ine ulaşılmaz; yeni kullanıcı kaydını burada kalıcı yapmalıyız.
+                    db.commit()
                     st.session_state[_SESSION_KEY] = user.id
                     st.success("Hesabınız oluşturuldu, giriş yapılıyor…")
                     st.rerun()
